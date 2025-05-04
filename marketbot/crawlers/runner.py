@@ -1,22 +1,10 @@
-from typing import Dict, List, MutableMapping, Type
+from typing import Dict, MutableMapping, TypeVar
 
 from cachetools import TTLCache
 
-from ._base import Crawler, Result
-from .goldapi_io import GoldAPI
-from .goldprice_org import GoldPrice
-from .gulfnews import GulfNews
-from .igold import IGoldAE
-from .metalpriceapi import MetalpriceAPI
+from .base import Crawler
 
-crawlers: List[Type[Crawler]] = [
-    GoldAPI,
-    GoldPrice,
-    GulfNews,
-    IGoldAE,
-    MetalpriceAPI,
-]
-
+T = TypeVar('T')
 
 _fail_tolerance = 10
 _fail_count: Dict[str, int] = {}
@@ -24,7 +12,7 @@ _cache: MutableMapping = TTLCache(100, 10)
 _disabled: MutableMapping = TTLCache(100, 3600)
 
 
-def run_crawler(crawler: Crawler) -> Result:
+def run_crawler(crawler: Crawler[T]) -> T:
     k = crawler.name
     if k in _cache:
         return _cache[k]

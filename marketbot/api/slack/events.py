@@ -12,5 +12,4 @@ router = APIRouter()
 )
 async def slack_command(ctx: ServerContext = Depends()):
     prices = ctx.gold_price.get_latest_gold_prices()
-    data = ctx.gold_price.build_slack_message(prices)
-    return data
+    return ctx.slack.build_message_for_gold_prices(prices)
