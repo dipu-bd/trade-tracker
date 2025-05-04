@@ -1,25 +1,8 @@
-# Gold Price Chart
-
-## Data
-
-| Chart                                                              |
-| ------------------------------------------------------------------ |
-| ![1 day](https://goldprice.org/charts/gold_1d_o_AED_z.png)         |
-| ![7 day](https://goldprice.org/charts/gold_7_day_o_x_aed.png)      |
-| ![30 days](https://goldprice.org/charts/gold_30_day_o_x_aed.png)   |
-| ![60 days](https://goldprice.org/charts/gold_60_day_o_x_aed.png)   |
-| ![6 months](https://goldprice.org/charts/gold_6_month_o_x_aed.png) |
-| ![1 year](https://goldprice.org/charts/gold_1_year_o_x_aed.png)    |
-| ![2 years](https://goldprice.org/charts/gold_2_year_o_x_aed.png)   |
-| ![5 years](https://goldprice.org/charts/gold_5_year_o_x_aed.png)   |
-| ![10 years](https://goldprice.org/charts/gold_10_year_o_x_aed.png) |
-| ![15 years](https://goldprice.org/charts/gold_15_year_o_x_aed.png) |
-| ![all](https://goldprice.org/charts/gold_all_data_o_x_aed.png)     |
-
-## Spot
+## Gold Price Chart
 
 ### 1 day
 
+![1 day](https://goldprice.org/charts/gold_1d_o_AED_z.png)
 ![spot](https://goldprice.org/charts/gold_1d_o_x_aed.png)
 
 ### 3 days
