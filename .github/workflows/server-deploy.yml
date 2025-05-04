@@ -1,0 +1,48 @@
+name: Deployment CI
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['main']
+    paths:
+      - marketbot/**
+      - Dockerfile
+      - requirements.txt
+      - MANIFEST.in
+      - .github/workflows/server-deploy.yml
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Configure SSH secret
+        run: echo "${{ secrets.SSH_SECRET }}" > ~/mbot.pem && chmod 600 ~/mbot.pem
+
+      - name: Setup Env file
+        run: echo "${{ secrets.ENV_FILE }}" > .env
+
+      - name: Build Docker image
+        run: docker build -f Dockerfile -t marketbot .
+
+      - name: Upload Docker image
+        run: docker save marketbot | bzip2 | ssh -i ~/mbot.pem -o StrictHostKeyChecking=no root@49.13.29.254 docker load
+
+      - name: Run as a container
+        run: |
+          ssh -i ~/mbot.pem \
+              -o StrictHostKeyChecking=no \
+              root@49.13.29.254 \
+              docker run -itd -p '9565:8000' \
+                  --restart=unless-stopped \
+                  --name=marketbot \
+                  marketbot
