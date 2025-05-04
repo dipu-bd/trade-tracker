@@ -4,7 +4,7 @@ WORKDIR /app
 
 COPY ./requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY ./marketbot/gold.py ./gold.py
+COPY ./marketbot ./marketbot
 COPY /.env ./.env
 
-CMD ["python", "gold.py"]
+CMD ["python", "-m", "fastapi", "run", "marketbot"]
