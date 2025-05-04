@@ -24,6 +24,10 @@ class GoldConfig:
         return env('SLACK_WEBHOOK_URL')
 
     @cached_property
+    def slack_signing_secret(self) -> str:
+        return env('SLACK_SIGNING_SECRET')
+
+    @cached_property
     def goldapi_token(self) -> str:
         return env('GOLDAPI_TOKEN')
 

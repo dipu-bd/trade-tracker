@@ -2,23 +2,17 @@ from abc import ABCMeta, abstractmethod
 from functools import cached_property
 
 import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 from marketbot.context import ServerContext
+from marketbot.utils.retry_session import RetrySession
 
 
 class Crawler(metaclass=ABCMeta):
-    _session = requests.Session()
+    _session: requests.Session
 
     def __init__(self, ctx: ServerContext):
         self._ctx = ctx
-        self._session.mount(
-            "http://", HTTPAdapter(max_retries=Retry(total=3)),
-        )
-        self._session.mount(
-            "https://", HTTPAdapter(max_retries=Retry(total=3)),
-        )
+        self._session = RetrySession()
 
     @property
     @abstractmethod
