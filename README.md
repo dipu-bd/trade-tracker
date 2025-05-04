@@ -1,10 +1,10 @@
 # Trade Tracker
 
-Get real time notifications on trade markers
+[![Deployment CI](https://github.com/dipu-bd/trade-tracker/actions/workflows/server-deploy.yml/badge.svg)](https://github.com/dipu-bd/trade-tracker/actions/workflows/server-deploy.yml)
+
+APIs for tracking market price changes
 
 ## Links
 
 - [Gold chart](https://dipu-bd.github.io/trade-tracker/)
-- [Trade Tracker Docs](https://trade-tracker.bitanon.dev/docs)
-
-<!-- https://trade-tracker.bitanon.dev/api/slack/command/gold-price -->
+- [MarketBot Docs](https://marketbot.bitanon.dev/docs)
