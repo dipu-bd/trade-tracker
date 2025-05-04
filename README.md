@@ -1,2 +1,7 @@
-# trade-tracker
-Get real time notifications on trade markers that I am interested in
+# Trade Tracker
+
+Get real time notifications on trade markers
+
+## Gold
+
+- [Gold chart](gold/xau-aed.md)
