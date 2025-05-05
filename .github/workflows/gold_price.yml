@@ -27,3 +27,10 @@ jobs:
 
       - name: Run the script
         run: python ./jobs/gold_price_slack_alert.py
+
+      - name: Save current price
+        uses: actions/upload-artifact@v4
+        with:
+          name: gold-price
+          path: gold-price.json
+          retention-days: 30
