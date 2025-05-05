@@ -6,14 +6,14 @@ concurrency:
 
 on:
   workflow_dispatch:
-  push:
-    branches: ['main']
-    paths:
-      - marketbot/**
-      - Dockerfile
-      - requirements.txt
-      - MANIFEST.in
-      - .github/workflows/server-deploy.yml
+  # push:
+  #   branches: ['main']
+  #   paths:
+  #     - marketbot/**
+  #     - Dockerfile
+  #     - requirements.txt
+  #     - MANIFEST.in
+  #     - .github/workflows/server-deploy.yml
 
 jobs:
   build:
@@ -21,9 +21,6 @@ jobs:
     steps:
       - name: Checkout main branch
         uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
 
       - name: Configure SSH secret
         run: echo "${{ secrets.SSH_SECRET }}" > ~/mbot.pem && chmod 600 ~/mbot.pem
@@ -35,13 +32,21 @@ jobs:
         run: docker build -f Dockerfile -t marketbot .
 
       - name: Upload Docker image
-        run: docker save marketbot | bzip2 | ssh -i ~/mbot.pem -o StrictHostKeyChecking=no root@49.13.29.254 docker load
+        run: docker save marketbot | bzip2 | ssh -i ~/mbot.pem -o StrictHostKeyChecking=no "${{ secrets.DEPLOY_SERVER }}" docker load
 
       - name: Run as a container
         run: |
           ssh -i ~/mbot.pem \
               -o StrictHostKeyChecking=no \
-              root@49.13.29.254 \
+              "${{ secrets.DEPLOY_SERVER }}" \
+              docker stop marketbot || true
+          ssh -i ~/mbot.pem \
+              -o StrictHostKeyChecking=no \
+              "${{ secrets.DEPLOY_SERVER }}" \
+              docker rm marketbot || true
+          ssh -i ~/mbot.pem \
+              -o StrictHostKeyChecking=no \
+              "${{ secrets.DEPLOY_SERVER }}" \
               docker run -itd -p '9565:8000' \
                   --restart=unless-stopped \
                   --name=marketbot \

@@ -20,11 +20,6 @@ class ServerContext:
 
     @cached_property
     @autoclose
-    def gold_price(self):
+    def gold(self):
         from .services import GoldPriceService
         return GoldPriceService(self)
-
-    @cached_property
-    def slack(self):
-        from .services import SlackMessagingService
-        return SlackMessagingService(self)

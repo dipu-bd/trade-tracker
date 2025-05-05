@@ -13,4 +13,4 @@ router = APIRouter()
     dependencies=[Depends(verify_access_token)],
 )
 def get_latest_prices(ctx: ServerContext = Depends()):
-    return ctx.gold_price.get_latest_gold_prices()
+    return ctx.gold.get_latest_gold_prices()

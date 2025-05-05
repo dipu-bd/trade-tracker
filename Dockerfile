@@ -7,4 +7,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY ./marketbot ./marketbot
 COPY /.env ./.env
 
-CMD ["python", "-m", "fastapi", "run", "marketbot"]
+EXPOSE 8000
+CMD ["python", "-m", "marketbot"]

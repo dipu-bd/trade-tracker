@@ -6,7 +6,7 @@ from .base import Crawler
 
 T = TypeVar('T')
 
-_fail_tolerance = 10
+_fail_tolerance = 5
 _fail_count: Dict[str, int] = {}
 _cache: MutableMapping = TTLCache(100, 10)
 _disabled: MutableMapping = TTLCache(100, 3600)

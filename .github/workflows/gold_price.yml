@@ -1,0 +1,29 @@
+name: Gold Price Slack Alert
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3-18/3 * * *' # Runs every 3 hours between 3AM to 18PM (GMT)
+
+jobs:
+  gold-price-alert:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Setup Env file
+        run: echo "${{ secrets.ENV_FILE }}" > .env
+
+      - name: Run the script
+        run: python ./jobs/gold_price_slack_alert.py

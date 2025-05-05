@@ -1,6 +1,7 @@
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from bs4 import BeautifulSoup
 
 
 class RetrySession(requests.Session):
@@ -29,4 +30,10 @@ class RetrySession(requests.Session):
 
     def request(self, method, url, **kwargs):
         kwargs.setdefault("timeout", self._timeout)
-        return super().request(method, url, **kwargs)
+        resp = super().request(method, url, **kwargs)
+        resp.raise_for_status()
+        return resp
+
+    def get_soup(self, url, **kwargs):
+        resp = self.request('GET', url, **kwargs)
+        return BeautifulSoup(resp.content, 'lxml')

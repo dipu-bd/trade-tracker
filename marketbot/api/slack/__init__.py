@@ -21,7 +21,6 @@ router.include_router(
     dependencies=[Depends(verify_access_token)],
 )
 def send_gold_price_alert(ctx: ServerContext = Depends()):
-    prices = ctx.gold_price.get_latest_gold_prices()
-    data = ctx.slack.build_message_for_gold_prices(prices)
-    ctx.slack.send_slack_alert(data)
-    return 'OK'
+    prices = ctx.gold.get_latest_gold_prices()
+    message = ctx.gold.build_slack_message(prices)
+    return ctx.gold.send_slack_alert(message)
