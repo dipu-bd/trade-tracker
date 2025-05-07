@@ -3,7 +3,7 @@ name: Gold Price Slack Alert
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 3-18/3 * * *' # Runs every 3 hours between 3AM to 18PM (GMT)
+    - cron: '45 */3 * * *'
 
 jobs:
   gold-price-alert:
