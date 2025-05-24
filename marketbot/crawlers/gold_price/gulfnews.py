@@ -14,6 +14,7 @@ class GulfNews(Crawler[GoldPriceResult]):
             'https://gulfnews.com/gold-forex/historical-gold-rates'
         )
 
+        resp.raise_for_status()
         soup = BeautifulSoup(resp.content, 'lxml')
         tds = [td.text for td in soup.select('#container table tr td')]
 

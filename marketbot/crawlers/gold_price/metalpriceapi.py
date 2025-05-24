@@ -16,7 +16,10 @@ class MetalpriceAPI(Crawler[GoldPriceResult]):
                 'api_key': self._ctx.config.gold.metalprice_token,
             }
         )
+
+        resp.raise_for_status()
         data = resp.json()
+
         return GoldPriceResult(
             name=self.name,
             link='https://metalpriceapi.com/',

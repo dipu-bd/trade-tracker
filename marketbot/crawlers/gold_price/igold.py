@@ -18,6 +18,7 @@ class IGoldAE(Crawler[GoldPriceResult]):
             }
         )
 
+        resp.raise_for_status()
         data = resp.json()
         last = float(data['last'][1])
         first = float(data['data'][0][1])

@@ -19,6 +19,7 @@ class GoldPrice(Crawler[GoldPriceResult]):
             }
         )
 
+        resp.raise_for_status()
         data = resp.json()
         item = data['items'][0]
 

@@ -14,7 +14,10 @@ class GoldAPI(Crawler[GoldPriceResult]):
                 'x-access-token': self._ctx.config.gold.goldapi_token,
             }
         )
+
+        resp.raise_for_status()
         data = resp.json()
+
         return GoldPriceResult(
             name=self.name,
             link='https://www.goldapi.io/',
