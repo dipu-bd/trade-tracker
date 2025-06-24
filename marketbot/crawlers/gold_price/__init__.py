@@ -29,7 +29,7 @@ def get_crawlers(ctx: ServerContext):
     global __crawlers
     if not __crawlers:
         __crawlers = [
-            Mashreq(ctx),
+            # Mashreq(ctx),
             GulfNews(ctx),
             GoldPrice(ctx),
             IGoldAE(ctx),
