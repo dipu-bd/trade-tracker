@@ -1,0 +1,120 @@
+{% extends "layout.html.j2" %}
+
+{% block header %}{{ portfolio.name }} — {{ opened|length }} added, {{ closed|length }} removed{% endblock %}
+
+{% block subheader %}
+<div style="font-size:13px;opacity:.75;margin-top:6px;">
+  {{ run.sleeve|capitalize }} scan &middot; {{ regime|capitalize }} regime &middot; {{ run.started_at.strftime('%d %b %Y %H:%M') }} UTC
+</div>
+{% endblock %}
+
+{% block content %}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;">
+  <tr>
+    <td style="padding:12px 14px;background:#f9fafb;border:1px solid #e4e7eb;border-radius:8px;">
+      <span style="font-size:12px;color:#7b8794;">Equity</span><br />
+      <span style="font-size:18px;font-weight:600;">{{ equity|money }}</span>
+      <span style="font-size:13px;color:{{ 'e12d39' if total_return < 0 else '0f8554' }};">
+        ({{ total_return|signed }}% vs original)
+      </span>
+    </td>
+    <td width="12"></td>
+    <td style="padding:12px 14px;background:#f9fafb;border:1px solid #e4e7eb;border-radius:8px;">
+      <span style="font-size:12px;color:#7b8794;">Cash</span><br />
+      <span style="font-size:18px;font-weight:600;">{{ cash|money }}</span>
+      <span style="font-size:13px;color:#7b8794;">({{ open_positions }} open)</span>
+    </td>
+  </tr>
+</table>
+
+{% if opened %}
+<h3 style="font-size:14px;text-transform:uppercase;letter-spacing:.08em;color:#0f8554;margin:0 0 10px;">Added</h3>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;margin-bottom:24px;">
+  <tr style="background:#f9fafb;color:#7b8794;text-align:left;">
+    <th style="padding:8px;border-bottom:1px solid #e4e7eb;">Symbol</th>
+    <th style="padding:8px;border-bottom:1px solid #e4e7eb;">Qty</th>
+    <th style="padding:8px;border-bottom:1px solid #e4e7eb;">Entry</th>
+    <th style="padding:8px;border-bottom:1px solid #e4e7eb;">Stop</th>
+    <th style="padding:8px;border-bottom:1px solid #e4e7eb;">Target</th>
+    <th style="padding:8px;border-bottom:1px solid #e4e7eb;">Score</th>
+  </tr>
+  {% for item in opened %}
+  <tr>
+    <td style="padding:8px;border-bottom:1px solid #f0f2f5;">
+      <strong>{{ item.symbol }}</strong>
+      <span style="color:#7b8794;font-size:11px;">{{ item.asset_class }}</span>
+      {% if item.flags %}
+      <div style="margin-top:3px;">
+        {% for flag in item.flags %}
+        <span style="display:inline-block;background:#eef2f7;color:#52606d;border-radius:3px;padding:1px 5px;font-size:10px;margin-right:3px;">{{ flag }}</span>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </td>
+    <td style="padding:8px;border-bottom:1px solid #f0f2f5;">{{ item.qty|qty }}</td>
+    <td style="padding:8px;border-bottom:1px solid #f0f2f5;">{{ item.price|money }}</td>
+    <td style="padding:8px;border-bottom:1px solid #f0f2f5;color:#e12d39;">{{ item.stop_price|money }}</td>
+    <td style="padding:8px;border-bottom:1px solid #f0f2f5;color:#0f8554;">{{ item.target_price|money }}</td>
+    <td style="padding:8px;border-bottom:1px solid #f0f2f5;">{{ item.score }}</td>
+  </tr>
+  {% if item.advisor_note %}
+  <tr>
+    <td colspan="6" style="padding:0 8px 8px;border-bottom:1px solid #f0f2f5;color:#52606d;font-size:12px;font-style:italic;">
+      Advisor: {{ item.advisor_note }}
+    </td>
+  </tr>
+  {% endif %}
+  {% endfor %}
+</table>
+{% endif %}
+
+{% if closed %}
+<h3 style="font-size:14px;text-transform:uppercase;letter-spacing:.08em;color:#e12d39;margin:0 0 10px;">Removed</h3>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;margin-bottom:24px;">
+  <tr style="background:#f9fafb;color:#7b8794;text-align:left;">
+    <th style="padding:8px;border-bottom:1px solid #e4e7eb;">Symbol</th>
+    <th style="padding:8px;border-bottom:1px solid #e4e7eb;">Qty</th>
+    <th style="padding:8px;border-bottom:1px solid #e4e7eb;">Entry</th>
+    <th style="padding:8px;border-bottom:1px solid #e4e7eb;">Exit</th>
+    <th style="padding:8px;border-bottom:1px solid #e4e7eb;">P&amp;L</th>
+    <th style="padding:8px;border-bottom:1px solid #e4e7eb;">Reason</th>
+  </tr>
+  {% for item in closed %}
+  <tr>
+    <td style="padding:8px;border-bottom:1px solid #f0f2f5;"><strong>{{ item.symbol }}</strong></td>
+    <td style="padding:8px;border-bottom:1px solid #f0f2f5;">{{ item.qty|qty }}</td>
+    <td style="padding:8px;border-bottom:1px solid #f0f2f5;">{{ item.avg_entry|money }}</td>
+    <td style="padding:8px;border-bottom:1px solid #f0f2f5;">{{ item.price|money }}</td>
+    <td style="padding:8px;border-bottom:1px solid #f0f2f5;color:{{ '#e12d39' if item.realized_pnl < 0 else '#0f8554' }};">
+      {{ item.realized_pnl|signed_money }} ({{ item.r_multiple|signed }}R)
+    </td>
+    <td style="padding:8px;border-bottom:1px solid #f0f2f5;color:#52606d;">{{ item.reason|replace('_', ' ') }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+{% if stop_moves %}
+<h3 style="font-size:14px;text-transform:uppercase;letter-spacing:.08em;color:#7b8794;margin:0 0 10px;">Stops raised</h3>
+<ul style="margin:0 0 24px;padding-left:18px;font-size:13px;color:#3e4c59;">
+  {% for move in stop_moves %}
+  <li>{{ move.symbol }}: {{ move.old_stop|money }} &rarr; <strong>{{ move.new_stop|money }}</strong></li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+{% if advice %}
+<h3 style="font-size:14px;text-transform:uppercase;letter-spacing:.08em;color:#7b8794;margin:0 0 10px;">
+  LLM advisor ({{ advisor_model }}, {{ advisor_mode }} mode)
+</h3>
+<ul style="margin:0;padding-left:18px;font-size:13px;color:#3e4c59;">
+  {% for row in advice %}
+  <li>
+    <strong>{{ row.symbol }}</strong> &mdash; {{ row.verdict|replace('_', ' ') }}
+    {% if row.applied %}<span style="color:#0f8554;">(applied)</span>{% endif %}
+    {% if row.reason %}<br /><span style="color:#7b8794;">{{ row.reason }}</span>{% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

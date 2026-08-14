@@ -1,0 +1,31 @@
+{% extends "layout.html.j2" %}
+
+{% block header %}{{ portfolio.name }} — {{ title }}{% endblock %}
+
+{% block subheader %}
+<div style="font-size:13px;opacity:.75;margin-top:6px;">{{ as_of }} UTC</div>
+{% endblock %}
+
+{% block content %}
+<div style="padding:14px 16px;background:#fff3f3;border:1px solid #f5c2c2;border-radius:8px;margin-bottom:20px;">
+  <div style="font-size:14px;font-weight:600;color:#a4161a;margin-bottom:4px;">{{ title }}</div>
+  <div style="font-size:13px;color:#52606d;">{{ message }}</div>
+</div>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:13px;">
+  <tr>
+    <td style="padding:6px 0;color:#7b8794;">Equity</td>
+    <td style="padding:6px 0;text-align:right;font-weight:600;">{{ equity|money }}</td>
+  </tr>
+  <tr>
+    <td style="padding:6px 0;color:#7b8794;">Cash</td>
+    <td style="padding:6px 0;text-align:right;font-weight:600;">{{ cash|money }}</td>
+  </tr>
+  <tr>
+    <td style="padding:6px 0;color:#7b8794;">Since inception</td>
+    <td style="padding:6px 0;text-align:right;font-weight:600;color:{{ '#e12d39' if total_return < 0 else '#0f8554' }};">
+      {{ total_return|signed }}%
+    </td>
+  </tr>
+</table>
+{% endblock %}

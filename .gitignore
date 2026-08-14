@@ -172,3 +172,8 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# MarketBot local database
+*.db
+*.db-wal
+*.db-shm

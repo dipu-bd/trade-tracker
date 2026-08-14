@@ -1,0 +1,61 @@
+name: Portfolio Dry Run
+
+# Manual only. The real portfolio database lives on the deployment server, so a
+# scheduled run here would operate on an empty, throwaway database. This
+# workflow exists to inspect the ranked candidates without trading anything.
+on:
+  workflow_dispatch:
+    inputs:
+      sleeve:
+        description: Which sleeve to scan
+        required: true
+        default: crypto
+        type: choice
+        options: [all, equity, crypto]
+
+jobs:
+  dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Setup Env file
+        run: echo "${{ secrets.ENV_FILE }}" > .env
+
+      - name: Create a scratch portfolio
+        env:
+          MARKETBOT_DB_URL: sqlite:///./scan.db
+          SCHEDULER_ENABLED: 'false'
+          SMTP_ENABLED: 'false'
+        run: python ./jobs/portfolio_scan.py --create "CI Dry Run" --capital 10000
+
+      - name: Scan
+        env:
+          MARKETBOT_DB_URL: sqlite:///./scan.db
+          SCHEDULER_ENABLED: 'false'
+          SMTP_ENABLED: 'false'
+          LLM_ADVISOR_MODE: 'off'
+        run: |
+          python ./jobs/portfolio_scan.py \
+            --portfolio 1 \
+            --sleeve "${{ inputs.sleeve }}" \
+            --dry-run \
+            --json candidates.json
+
+      - name: Upload candidates
+        uses: actions/upload-artifact@v4
+        with:
+          name: portfolio-candidates
+          path: candidates.json
+          retention-days: 30

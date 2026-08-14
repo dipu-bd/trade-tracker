@@ -4,6 +4,13 @@ beautifulsoup4
 cachetools
 python-dotenv
 fastapi[standard]
+sqlalchemy>=2.0
+jinja2
+apscheduler
+
+# Optional: only needed when LLM_ADVISOR_MODE != off
+anthropic
+openai
 
 types-requests
 types-cachetools

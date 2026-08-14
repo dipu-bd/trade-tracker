@@ -50,4 +50,6 @@ jobs:
               docker run -itd -p '9565:8000' \
                   --restart=unless-stopped \
                   --name=marketbot \
+                  -v marketbot-data:/data \
+                  --add-host=host.docker.internal:host-gateway \
                   marketbot
