@@ -1,13 +1,19 @@
 from functools import lru_cache
-from typing import Literal
+from pathlib import Path
+from typing import Annotated, Literal
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+# Absolute so a process started in the repo root and one started in backend/ read the same file.
+# Containers get their configuration injected as environment variables instead.
+REPO_ROOT = Path(__file__).resolve().parents[4]
+ENV_FILE = REPO_ROOT / ".env"
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=ENV_FILE,
         env_prefix="TRADEBOT_",
         extra="ignore",
     )
@@ -24,7 +30,9 @@ class Settings(BaseSettings):
     cookie_secure: bool = True
     cookie_domain: str | None = None
 
-    cors_origins: list[str] = []
+    # NoDecode because pydantic-settings JSON-decodes list fields before validators run, which
+    # rejects a plain comma-separated value in the env file.
+    cors_origins: Annotated[list[str], NoDecode] = []
     static_dir: str | None = None
 
     log_level: str = "INFO"

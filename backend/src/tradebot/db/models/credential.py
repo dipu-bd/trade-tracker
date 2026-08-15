@@ -7,7 +7,7 @@ from tradebot.db.base import Base, TimestampMixin
 class Credential(Base, TimestampMixin):
     __tablename__ = "credentials"
     __table_args__ = (
-        UniqueConstraint("user_id", "provider_key", "label", name="uq_credential_slot"),
+        UniqueConstraint("user_id", "provider_key", "field", "label", name="uq_credential_slot"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

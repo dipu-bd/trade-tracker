@@ -56,6 +56,22 @@ cd frontend && pnpm run typecheck && pnpm run build
 
 `alembic check` in CI fails the build if the models drift from the migrations.
 
+## Market data providers
+
+Providers declare their capabilities (quotes, bars, streaming, news, fundamentals, corporate
+actions) and asset classes, so adding one is a new file plus a registration rather than a change
+to any caller. A router picks the highest-priority available provider per capability and asset
+class, failing over on error and backing off on rate limits.
+
+Crypto symbols are stored canonically as `BASE-USD`. Dollar-pegged quote legs (USDT, USDC,
+FDUSD, …) collapse into that single `USD` leg, so the same coin is one instrument no matter which
+venue serves it, and venue-specific spellings stay inside their adapter.
+
+**Deployment note:** Binance's public market-data endpoints are geo-blocked from US IP addresses.
+This project is intended to run from a non-US host; on a US-hosted server the Binance provider
+will fail and the crypto universe falls back to Crypto.com, which lists far fewer dollar pairs.
+Swapping in a Kraken or Coinbase adapter would be a new file plus a registration if that changes.
+
 ## Configuration
 
 Every setting is an environment variable prefixed `TRADEBOT_`; see `.env.example`.

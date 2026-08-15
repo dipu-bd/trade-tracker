@@ -67,6 +67,10 @@ disallow_untyped_defs = true
 module = ["tradebot.analytics.*", "tradebot.broker.*", "tradebot.ai.*"]
 strict = true
 
+[[tool.mypy.overrides]]
+module = ["exchange_calendars.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

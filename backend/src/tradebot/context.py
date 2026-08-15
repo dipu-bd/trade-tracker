@@ -6,6 +6,7 @@ from tradebot.core.settings import Settings
 from tradebot.db.session import Database
 from tradebot.obs import EventBus, EventRecorder
 from tradebot.services import AuthService, CredentialVault
+from tradebot.services.providers import ProviderService
 
 
 @dataclass
@@ -17,18 +18,22 @@ class AppContext:
     events: EventRecorder
     auth: AuthService
     vault: CredentialVault
+    providers: ProviderService
 
     @classmethod
     def build(cls, settings: Settings, *, clock: Clock | None = None) -> "AppContext":
         bus = EventBus()
+        vault = CredentialVault(SecretBox(settings.secret_key))
+        clock = clock or LiveClock()
         return cls(
             settings=settings,
             db=Database(settings.database_url, echo=settings.database_echo),
-            clock=clock or LiveClock(),
+            clock=clock,
             bus=bus,
             events=EventRecorder(bus),
             auth=AuthService(settings),
-            vault=CredentialVault(SecretBox(settings.secret_key)),
+            vault=vault,
+            providers=ProviderService(vault, clock=clock),
         )
 
     async def aclose(self) -> None:
