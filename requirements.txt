@@ -1,9 +1,0 @@
-lxml
-requests
-beautifulsoup4
-cachetools
-python-dotenv
-fastapi[standard]
-
-types-requests
-types-cachetools
