@@ -68,7 +68,7 @@ module = ["tradebot.analytics.*", "tradebot.broker.*", "tradebot.ai.*"]
 strict = true
 
 [[tool.mypy.overrides]]
-module = ["exchange_calendars.*"]
+module = ["apscheduler.*", "exchange_calendars.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

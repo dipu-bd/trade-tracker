@@ -19,6 +19,7 @@ def settings(tmp_path) -> Settings:  # type: ignore[no-untyped-def]
         secret_key=TEST_SECRET,
         cookie_secure=False,
         log_json=False,
+        scheduler_enabled=False,
     )
 
 

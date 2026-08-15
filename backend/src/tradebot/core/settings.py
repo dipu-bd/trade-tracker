@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_json: bool = True
 
+    scheduler_enabled: bool = True
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, value: object) -> object:

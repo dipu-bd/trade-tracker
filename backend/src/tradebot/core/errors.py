@@ -35,3 +35,10 @@ class ForbiddenError(TradebotError):
 class RateLimitedError(TradebotError):
     status_code = 429
     code = "rate_limited"
+
+
+class LookAheadError(TradebotError):
+    """Decision code reached for data stamped after the clock. Never catch this — a backtest
+    that swallows it silently reports fiction."""
+
+    code = "look_ahead"

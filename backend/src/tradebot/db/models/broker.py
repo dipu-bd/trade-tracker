@@ -1,7 +1,9 @@
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     Date,
     ForeignKey,
@@ -13,7 +15,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from tradebot.db.base import Base, TimestampMixin, UtcDateTime, utcnow
+from tradebot.db.base import Base, TimestampMixin, UtcDateTime
 
 MONEY = Numeric(28, 10)
 PRICE = Numeric(20, 8)
@@ -81,6 +83,12 @@ class Portfolio(Base, TimestampMixin):
     min_commission: Mapped[Decimal] = mapped_column(MONEY, default=Decimal(0))
     allow_fractional: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    benchmark: Mapped[str] = mapped_column(String(32), default="SPY")
+    cadence: Mapped[str] = mapped_column(String(32), default="daily")
+    autopilot: Mapped[bool] = mapped_column(Boolean, default=False)
+    strategy: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    universe: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
     orders: Mapped[list["Order"]] = relationship(
         back_populates="portfolio", cascade="all, delete-orphan"
     )
@@ -96,7 +104,7 @@ class LedgerEntry(Base):
     portfolio_id: Mapped[int] = mapped_column(
         ForeignKey("portfolios.id", ondelete="CASCADE"), index=True
     )
-    at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow, index=True)
+    at: Mapped[datetime] = mapped_column(UtcDateTime, index=True)
     entry_type: Mapped[str] = mapped_column(String(16))
     amount: Mapped[Decimal] = mapped_column(MONEY)
     balance_after: Mapped[Decimal] = mapped_column(MONEY)
@@ -162,7 +170,7 @@ class Fill(Base):
     price: Mapped[Decimal] = mapped_column(PRICE)
     fee: Mapped[Decimal] = mapped_column(MONEY, default=Decimal(0))
     slippage_amount: Mapped[Decimal] = mapped_column(MONEY, default=Decimal(0))
-    executed_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow, index=True)
+    executed_at: Mapped[datetime] = mapped_column(UtcDateTime, index=True)
 
     order: Mapped[Order] = relationship(back_populates="fills")
 
@@ -190,8 +198,12 @@ class Position(Base, TimestampMixin):
     realized_pnl: Mapped[Decimal] = mapped_column(MONEY, default=Decimal(0))
     fees_paid: Mapped[Decimal] = mapped_column(MONEY, default=Decimal(0))
 
-    opened_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
+    opened_at: Mapped[datetime] = mapped_column(UtcDateTime)
     closed_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
+
+    stop_price: Mapped[Decimal | None] = mapped_column(PRICE, default=None)
+    highest_close: Mapped[Decimal | None] = mapped_column(PRICE, default=None)
+    laddered: Mapped[bool] = mapped_column(Boolean, default=False)
 
     lots: Mapped[list["Lot"]] = relationship(
         back_populates="position", cascade="all, delete-orphan"
@@ -219,7 +231,7 @@ class Lot(Base):
     qty_open: Mapped[Decimal] = mapped_column(QUANTITY)
     cost_basis: Mapped[Decimal] = mapped_column(PRICE)
     fee_paid: Mapped[Decimal] = mapped_column(MONEY, default=Decimal(0))
-    opened_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow, index=True)
+    opened_at: Mapped[datetime] = mapped_column(UtcDateTime, index=True)
 
     position: Mapped[Position] = relationship(back_populates="lots")
 
@@ -241,3 +253,33 @@ class PortfolioSnapshot(Base):
     unrealized_pnl: Mapped[Decimal] = mapped_column(MONEY, default=Decimal(0))
     open_positions: Mapped[int] = mapped_column(Integer, default=0)
     drawdown_pct: Mapped[Decimal] = mapped_column(Numeric(10, 4), default=Decimal(0))
+
+
+class DecisionRun(Base):
+    """One decision cycle, kept so "why did it buy this?" has an answer."""
+
+    __tablename__ = "decision_runs"
+    __table_args__ = (Index("ix_decision_runs_portfolio_started", "portfolio_id", "started_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    portfolio_id: Mapped[int] = mapped_column(
+        ForeignKey("portfolios.id", ondelete="CASCADE"), index=True
+    )
+    correlation_id: Mapped[str] = mapped_column(String(36), index=True)
+    trigger: Mapped[str] = mapped_column(String(24), default="scheduled")
+
+    started_at: Mapped[datetime] = mapped_column(UtcDateTime, index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
+    as_of: Mapped[date] = mapped_column(Date)
+
+    status: Mapped[str] = mapped_column(String(16), default="running")
+    regime: Mapped[str] = mapped_column(String(16), default="")
+    exposure: Mapped[Decimal] = mapped_column(Numeric(10, 4), default=Decimal(0))
+
+    candidates: Mapped[int] = mapped_column(Integer, default=0)
+    entries: Mapped[int] = mapped_column(Integer, default=0)
+    exits: Mapped[int] = mapped_column(Integer, default=0)
+    orders_placed: Mapped[int] = mapped_column(Integer, default=0)
+
+    detail: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    error: Mapped[str | None] = mapped_column(String(500), default=None)

@@ -14,6 +14,7 @@ from tradebot.core.errors import TradebotError
 from tradebot.core.logging import configure_logging, get_logger
 from tradebot.core.settings import Settings, get_settings
 from tradebot.obs import metrics
+from tradebot.workers.scheduler import EngineScheduler
 
 _log = get_logger(__name__)
 
@@ -22,9 +23,16 @@ _log = get_logger(__name__)
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     context: AppContext = app.state.context
     _log.info("startup", env=context.settings.env)
+
+    scheduler = EngineScheduler(context)
+    app.state.scheduler = scheduler
+    if context.settings.scheduler_enabled:
+        scheduler.start()
+
     try:
         yield
     finally:
+        scheduler.shutdown()
         await context.aclose()
         _log.info("shutdown")
 

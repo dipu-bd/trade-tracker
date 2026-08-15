@@ -1,5 +1,6 @@
 from tradebot.db.base import Base
 from tradebot.db.models.broker import (
+    DecisionRun,
     EntryType,
     Fill,
     LedgerEntry,
@@ -28,6 +29,7 @@ __all__ = [
     "Base",
     "CorporateActionRecord",
     "Credential",
+    "DecisionRun",
     "EntryType",
     "Event",
     "Fill",
