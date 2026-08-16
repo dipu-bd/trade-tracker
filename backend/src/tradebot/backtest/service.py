@@ -1,9 +1,10 @@
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tradebot.backtest.report import BacktestReport, summarise
+from tradebot.backtest.ic import measure_from_decisions
+from tradebot.backtest.report import BacktestReport, leakage_split, summarise
 from tradebot.backtest.runner import (
     ReplayRunner,
     buy_and_hold,
@@ -74,12 +75,102 @@ class BacktestService:
                 )
                 report.control = summarise(control, 1)
 
+        report.signals.append(await measure_from_decisions(session, portfolio.id))
+
         report.notes.append(
-            "Costs applied: the portfolio's own slippage and commission, plus the square-root "
-            "impact term where participation is known."
+            "Costs applied: the portfolio's own slippage and commission, plus a square-root "
+            "impact term sized by each order's share of median daily dollar volume."
         )
         await self._cleanup(session, sandbox)
         return report
+
+    async def ablate(
+        self,
+        session: AsyncSession,
+        portfolio: Portfolio,
+        start: date,
+        end: date,
+        arms: dict[str, object] | None = None,
+    ) -> BacktestReport:
+        """Run each arm over the SAME window with the SAME trial accounting.
+
+        Arms run on different windows, or deflated by different trial counts, would flatter
+        whichever arm was tried least — which is the comparison the prior art does not provide
+        and the reason this exists at all.
+        """
+        arms = arms or {"rules_only": None}
+        days = await trading_days(session, portfolio.benchmark, start, end)
+        report = BacktestReport(start=start, end=end)
+
+        if len(days) < 2:
+            report.notes.append(f"No usable calendar for {portfolio.benchmark}.")
+            return report
+
+        for name in arms:
+            self._trials.record(strategy_config(portfolio))
+            del name
+
+        trials = self._trials.trials
+        report.trials = trials
+
+        for name, pipeline in arms.items():
+            sandbox = await self._sandbox(session, portfolio, days[0])
+            sandbox.ai_enabled = pipeline is not None
+            result = await ReplayRunner(self._events).run(
+                session, sandbox, days, label=name, ai_pipeline=pipeline
+            )
+            report.strategies.append(summarise(result, trials))
+            await self._cleanup(session, sandbox)
+
+        report.benchmark = summarise(
+            await buy_and_hold(
+                session, portfolio.benchmark, days, capital=float(portfolio.initial_capital)
+            ),
+            1,
+        )
+        report.notes.append(
+            f"All {len(arms)} arms ran the same {len(days)} sessions and are deflated by the "
+            f"same trial count ({trials})."
+        )
+        return report
+
+    async def leakage_check(
+        self,
+        session: AsyncSession,
+        portfolio: Portfolio,
+        cutoff: date,
+        span_days: int = 180,
+    ) -> dict[str, object]:
+        """Run the same strategy either side of the model's training cutoff.
+
+        A large gap is a leakage signal rather than a strategy result: a model asked about a
+        window inside its own training data may simply be recalling what happened.
+        """
+        before_days = await trading_days(
+            session, portfolio.benchmark, cutoff - timedelta(days=span_days), cutoff
+        )
+        after_days = await trading_days(
+            session, portfolio.benchmark, cutoff, cutoff + timedelta(days=span_days)
+        )
+
+        if len(before_days) < 2 or len(after_days) < 2:
+            return {
+                "checked": False,
+                "reason": "not enough history on both sides of the cutoff",
+                "cutoff": cutoff.isoformat(),
+            }
+
+        runner = ReplayRunner(self._events)
+
+        pre_sandbox = await self._sandbox(session, portfolio, before_days[0])
+        before = await runner.run(session, pre_sandbox, before_days, label="pre_cutoff")
+        await self._cleanup(session, pre_sandbox)
+
+        post_sandbox = await self._sandbox(session, portfolio, after_days[0])
+        after = await runner.run(session, post_sandbox, after_days, label="post_cutoff")
+        await self._cleanup(session, post_sandbox)
+
+        return leakage_split(before, after, cutoff)
 
     async def _sandbox(self, session: AsyncSession, portfolio: Portfolio, start: date) -> Portfolio:
         clock = FrozenClock(_at(start))

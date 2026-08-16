@@ -713,6 +713,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/portfolios/{portfolio_id}/backtest/ablation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Ablation
+         * @description Compare the arms on identical windows with identical trial accounting.
+         *
+         *     Currently rules-only is the only arm with no model configured; the AI arms appear once a
+         *     portfolio has model endpoints, since each needs a live provider to answer.
+         */
+        post: operations["run_ablation_api_portfolios__portfolio_id__backtest_ablation_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portfolios/{portfolio_id}/backtest/leakage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Leakage Check
+         * @description Run the strategy either side of a model's training cutoff and report the gap.
+         */
+        post: operations["run_leakage_check_api_portfolios__portfolio_id__backtest_leakage_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/engine/presets": {
         parameters: {
             query?: never;
@@ -2926,6 +2969,78 @@ export interface operations {
                 start?: string | null;
                 end?: string | null;
                 control?: boolean;
+            };
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_ablation_api_portfolios__portfolio_id__backtest_ablation_post: {
+        parameters: {
+            query?: {
+                start?: string | null;
+                end?: string | null;
+            };
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_leakage_check_api_portfolios__portfolio_id__backtest_leakage_post: {
+        parameters: {
+            query: {
+                cutoff: string;
+                span_days?: number;
             };
             header?: never;
             path: {

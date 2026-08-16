@@ -18,6 +18,7 @@ from tradebot.ai.deliberation import (
 from tradebot.ai.guardrails import GuardrailConfig, GuardrailResult
 from tradebot.ai.reflection import recall
 from tradebot.analytics.features import Features
+from tradebot.backtest.ic import SignalQuality, apply_deweighting, measure_from_decisions
 from tradebot.core.clock import Clock
 from tradebot.db.models import AICall, Portfolio
 from tradebot.engine.strategy import Decision, PortfolioState, StrategyConfig
@@ -48,6 +49,7 @@ class AIOutcome:
     deliberation: DeliberationResult | None = None
     guardrail: GuardrailResult | None = None
     lessons: list[str] = field(default_factory=list)
+    quality: SignalQuality | None = None
     enabled: bool = False
     reason: str = ""
 
@@ -72,7 +74,13 @@ class AIOutcome:
         if self.guardrail is not None:
             detail["guardrail_diff"] = self.guardrail.diff
             detail["accepted"] = self.guardrail.accepted
-            detail["confidence"] = {k: round(v, 4) for k, v in self.guardrail.confidence.items()}
+            detail["confidence"] = {k: round(v, 4) for k, v in self.confidence.items()}
+            detail["confidence_before_deweighting"] = {
+                k: round(v, 4) for k, v in self.guardrail.confidence.items()
+            }
+        if self.quality is not None:
+            detail["signal_quality"] = self.quality.as_dict()
+            detail["deweighting"] = self.quality.verdict()
         return detail
 
 
@@ -185,6 +193,8 @@ class AIPipeline:
                 reason=result.parse_error or "model unavailable",
             )
 
+        quality = await measure_from_decisions(session, portfolio.id)
+
         clamped = guardrails.apply(
             result.verdicts,
             decision,
@@ -198,11 +208,14 @@ class AIPipeline:
             turnover=config.turnover,
         )
 
+        # The self-honesty loop: influence the model has not earned out of sample is removed
+        # before sizing sees it, so a failing AI degrades the system toward rules-only.
         return AIOutcome(
-            confidence=clamped.confidence,
+            confidence=apply_deweighting(clamped.confidence, quality),
             deliberation=result,
             guardrail=clamped,
             lessons=lessons,
+            quality=quality,
             enabled=True,
         )
 

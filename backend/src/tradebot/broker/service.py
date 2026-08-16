@@ -26,6 +26,7 @@ from tradebot.db.models import (
     PortfolioSnapshot,
     Position,
     PositionStatus,
+    PriceBar,
     Side,
     TimeInForce,
 )
@@ -34,6 +35,7 @@ from tradebot.obs import EventRecorder
 from tradebot.providers.base import AssetClass, Quote
 
 ZERO = Decimal(0)
+PARTICIPATION_WINDOW = 20
 
 
 @dataclass
@@ -308,7 +310,8 @@ class BrokerService:
         qty: Decimal,
         reference: Decimal,
     ) -> FillResult:
-        costs = CostModel.of(portfolio)
+        participation = await self._participation(session, instrument, qty, reference)
+        costs = CostModel.of(portfolio).at_participation(participation)
         price = costs.fill_price(reference, order.side)
         notional = quantize_cash(qty * price)
         fee = costs.commission(notional)
@@ -354,6 +357,30 @@ class BrokerService:
             payload={"qty": str(qty), "price": str(price), "fee": str(fee)},
         )
         return FillResult(order.id, qty, price, fee, realized)
+
+    async def _participation(
+        self, session: AsyncSession, instrument: Instrument, qty: Decimal, reference: Decimal
+    ) -> Decimal:
+        """This order's notional as a fraction of the instrument's recent daily dollar volume.
+
+        Median rather than mean over the window: one earnings-day volume spike would otherwise
+        make every subsequent order look negligible.
+        """
+        rows = await session.scalars(
+            select(PriceBar.close * PriceBar.volume)
+            .where(PriceBar.instrument_id == instrument.id)
+            .order_by(PriceBar.bar_date.desc())
+            .limit(PARTICIPATION_WINDOW)
+        )
+        volumes = sorted(Decimal(str(value)) for value in rows if value)
+        if not volumes:
+            return ZERO
+
+        median = volumes[len(volumes) // 2]
+        if median <= ZERO:
+            return ZERO
+
+        return (qty * reference) / median
 
     async def _settle_buy(
         self,

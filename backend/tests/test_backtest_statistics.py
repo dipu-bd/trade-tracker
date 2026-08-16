@@ -206,11 +206,27 @@ def test_a_signal_that_orders_returns_correctly_keeps_its_influence() -> None:
     assert quality.weight == 1.0
 
 
-def test_too_few_observations_hold_influence_at_zero() -> None:
+def test_too_little_history_leaves_influence_unchanged() -> None:
+    """Absence of evidence is not evidence of failure.
+
+    Withholding influence during warm-up is self-defeating: zero confidence opens no positions,
+    no positions generate no evidence, so the signal could never earn back what it never had.
+    """
     quality = ic.assess("llm_confidence", [1.0, 2.0, 3.0], [0.1, 0.2, 0.3])
 
-    assert quality.weight == 0.0
+    assert quality.is_warming_up
+    assert quality.weight == 1.0
     assert "too few" in quality.verdict()
+
+
+def test_a_measured_negative_ic_decays_influence_to_zero_not_merely_downward() -> None:
+    """Item 13 must actually bite: a failing AI ends with no influence, not a little less."""
+    quality = ic.SignalQuality("llm", observations=200, mean_ic=-0.05, t_stat=-2.4, windows=90)
+
+    assert not quality.is_warming_up
+    assert quality.weight == 0.0
+    assert ic.apply_deweighting({"AAA": 1.0}, quality) == {"AAA": 0.0}
+    assert "decayed to zero" in quality.verdict()
 
 
 def test_deweighting_scales_confidence_toward_rules_only() -> None:
