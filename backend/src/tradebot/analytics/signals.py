@@ -145,17 +145,24 @@ def assess_regime(
 
 
 def entry_score(
-    trend: TrendSignal, rank: float | None, features: Features, regime: Regime
+    trend: TrendSignal,
+    rank: float | None,
+    features: Features,
+    regime: Regime,
+    require_trend: bool = True,
 ) -> float:
     """Blend the two momentum sources into one comparable number, in [0, 1].
 
     Used only to rank candidates against each other for the turnover budget — never as a
     probability, and never fed to the sizer directly.
+
+    `require_trend` exists for the ablation: with it off the score no longer gates on direction,
+    which is what isolates the volatility scaling from the momentum signal.
     """
-    if not trend.is_long:
+    if require_trend and not trend.is_long:
         return 0.0
 
-    components = [trend.agreement]
+    components = [trend.agreement if require_trend else 0.5]
     if rank is not None:
         components.append(rank)
     if features.adx_14 > 0:

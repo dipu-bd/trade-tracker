@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { usePortfolios } from '@/api/hooks'
 import { Button, Card, Field, inputClass } from '@/components/ui'
 import { AICallLog } from '@/pages/AICallLog'
+import { Backtest } from '@/pages/Backtest'
 import { AnalystChat } from '@/pages/Chat'
 import { MarketExplorer } from '@/pages/Market'
 import { EventFeed, PriceTracking, ProviderHealthPage } from '@/pages/Observability'
@@ -17,6 +18,7 @@ const TABS = [
   'Blotter',
   'Strategy',
   'AI log',
+  'Backtest',
   'Chat',
   'Market',
   'Prices',
@@ -51,7 +53,9 @@ function Shell() {
   const [portfolioId, setPortfolioId] = useState<number | null>(null)
 
   const active = portfolioId ?? portfolios.data?.[0]?.id ?? null
-  const needsPortfolio = ['Detail', 'Blotter', 'Strategy', 'AI log', 'Chat'].includes(tab)
+  const needsPortfolio = ['Detail', 'Blotter', 'Strategy', 'AI log', 'Backtest', 'Chat'].includes(
+    tab,
+  )
 
   return (
     <div className="min-h-full">
@@ -123,6 +127,7 @@ function Shell() {
             {tab === 'Blotter' && active !== null && <Blotter id={active} />}
             {tab === 'Strategy' && active !== null && <StrategyPage id={active} />}
             {tab === 'AI log' && active !== null && <AICallLog portfolioId={active} />}
+            {tab === 'Backtest' && active !== null && <Backtest id={active} />}
             {tab === 'Chat' && active !== null && <AnalystChat id={active} />}
             {tab === 'Market' && <MarketExplorer />}
             {tab === 'Prices' && <PriceTracking />}

@@ -231,3 +231,27 @@ async def test_a_closed_position_holds_no_open_lots(
 
     assert lots == []
     assert position.qty == ZERO
+
+
+async def test_a_name_can_be_re_entered_after_being_fully_exited(
+    context: AppContext, broker: BrokerService
+) -> None:
+    """A momentum strategy re-enters names it has already traded.
+
+    The open-position constraint spanned `status`, so the second exit collided with the first
+    closed position and raised an IntegrityError mid-cycle.
+    """
+    ids = await setup(context, slippage_bps=ZERO, commission_bps=ZERO)
+
+    await buy(context, broker, ids, "10", "100")
+    await sell(context, broker, ids, "10", "110")
+    await buy(context, broker, ids, "5", "120")
+    await sell(context, broker, ids, "5", "130")
+
+    async with context.db.session() as session:
+        positions = list(await session.scalars(select(Position)))
+        report = await reconcile(session, Ledger(clock=FrozenClock(NOW)), ids[0])
+
+    assert len(positions) == 2
+    assert all(item.status == "CLOSED" for item in positions)
+    assert report.ok, report.problems

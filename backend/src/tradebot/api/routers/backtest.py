@@ -72,3 +72,22 @@ async def run_leakage_check(
     portfolio = await load_portfolio(session, portfolio_id, user.id)
     service = BacktestService(context.events)
     return await service.leakage_check(session, portfolio, cutoff, span_days)
+
+
+@router.post("/{portfolio_id}/backtest/scaling", response_model=dict[str, Any])
+async def run_scaling_ablation(
+    portfolio_id: int,
+    user: CurrentUser,
+    context: Context,
+    session: DbSession,
+    start: date | None = None,
+    end: date | None = None,
+) -> dict[str, Any]:
+    """Signal alone vs scaling alone vs both — which component actually produces the return."""
+    portfolio = await load_portfolio(session, portfolio_id, user.id)
+    finish = end or context.clock.now().date()
+    begin = start or finish - timedelta(days=DEFAULT_WINDOW_DAYS)
+
+    service = BacktestService(context.events)
+    report = await service.ablate_scaling(session, portfolio, begin, finish)
+    return report.as_dict()

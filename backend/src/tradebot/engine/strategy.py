@@ -36,6 +36,7 @@ class StrategyConfig:
     turnover: TurnoverConfig = field(default_factory=TurnoverConfig)
     costs: CostConfig = field(default_factory=CostConfig)
     benchmark: str = "SPY"
+    require_trend: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,11 +201,14 @@ def _pick_entries(
             continue
 
         signal = signals.get(symbol)
-        if signal is None or not signal.is_long:
+        if signal is None:
+            skipped[symbol] = "no features"
+            continue
+        if config.require_trend and not signal.is_long:
             skipped[symbol] = "no long trend signal"
             continue
 
-        score = entry_score(signal, ranks.get(symbol), features, regime)
+        score = entry_score(signal, ranks.get(symbol), features, regime, config.require_trend)
         if score <= 0:
             skipped[symbol] = "zero entry score"
             continue

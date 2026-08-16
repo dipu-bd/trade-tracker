@@ -756,6 +756,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/portfolios/{portfolio_id}/backtest/scaling": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Scaling Ablation
+         * @description Signal alone vs scaling alone vs both — which component actually produces the return.
+         */
+        post: operations["run_scaling_ablation_api_portfolios__portfolio_id__backtest_scaling_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/engine/presets": {
         parameters: {
             query?: never;
@@ -3041,6 +3061,42 @@ export interface operations {
             query: {
                 cutoff: string;
                 span_days?: number;
+            };
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_scaling_ablation_api_portfolios__portfolio_id__backtest_scaling_post: {
+        parameters: {
+            query?: {
+                start?: string | null;
+                end?: string | null;
             };
             header?: never;
             path: {

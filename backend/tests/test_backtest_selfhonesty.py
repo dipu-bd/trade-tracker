@@ -298,3 +298,115 @@ async def test_the_leakage_endpoint_requires_a_cutoff(
     )
 
     assert response.status_code == 422
+
+
+async def test_the_scaling_ablation_runs_three_arms_and_names_the_winner(
+    context: AppContext, clock: FrozenClock
+) -> None:
+    """Item 17. If the scaling is doing the work, that is a finding, not a footnote."""
+    await seed(context, "SPY", daily=0.0008, count=400, asset_class="index", end=LAST_BAR)
+    # Different volatilities so scaling has something to scale, and a faller so the trend
+    # filter has something to exclude.
+    await seed(context, "CALM", daily=0.002, count=400, spread=0.002, end=LAST_BAR)
+    await seed(context, "WILD", daily=0.002, count=400, spread=0.05, end=LAST_BAR)
+    await seed(context, "FALLING", daily=-0.002, count=400, spread=0.01, end=LAST_BAR)
+    portfolio_id = await make_portfolio(context, clock)
+
+    async with context.db.session() as session:
+        portfolio = await session.get(Portfolio, portfolio_id)
+        portfolio.strategy = {"sizing": {"risk_per_trade": 0.05, "max_position_weight": 0.5}}
+        report = await BacktestService(context.events).ablate_scaling(
+            session, portfolio, LAST_BAR - timedelta(days=90), LAST_BAR
+        )
+
+    labels = [item.label for item in report.strategies]
+    assert labels == ["signal_only", "scaling_only", "both"]
+
+    periods = {item.performance.periods for item in report.strategies}
+    trials = {item.deflated.trials for item in report.strategies}
+    assert len(periods) == 1, "arms ran different windows"
+    assert len(trials) == 1, "arms were deflated by different trial counts"
+
+    notes = " ".join(report.notes)
+    assert "Signal alone" in notes and "scaling alone" in notes and "both" in notes
+    assert "one trial count" in notes
+
+
+def test_the_scaling_verdict_says_plainly_when_scaling_is_doing_the_work() -> None:
+    from tradebot.backtest.service import _scaling_verdict
+
+    verdict = _scaling_verdict({"signal_only": 0.01, "scaling_only": 0.18, "both": 0.12})
+
+    assert "VOLATILITY SCALING is doing the work" in verdict
+    assert "not earning its place" in verdict
+
+
+def test_the_scaling_verdict_says_when_the_signal_is_doing_the_work() -> None:
+    from tradebot.backtest.service import _scaling_verdict
+
+    verdict = _scaling_verdict({"signal_only": 0.20, "scaling_only": 0.02, "both": 0.15})
+
+    assert "MOMENTUM SIGNAL is doing the work" in verdict
+
+
+def test_the_scaling_verdict_warns_when_scaling_alone_nearly_matches_both() -> None:
+    """The replications' actual warning: scaling reproducing the result without the signal."""
+    from tradebot.backtest.service import _scaling_verdict
+
+    verdict = _scaling_verdict({"signal_only": 0.05, "scaling_only": 0.115, "both": 0.12})
+
+    assert "treat the momentum signal's contribution as unproven" in verdict
+
+
+def test_the_scaling_verdict_credits_both_when_neither_reproduces_the_result() -> None:
+    from tradebot.backtest.service import _scaling_verdict
+
+    verdict = _scaling_verdict({"signal_only": 0.04, "scaling_only": 0.05, "both": 0.20})
+
+    assert "Both components contributed" in verdict
+
+
+def test_turning_off_volatility_scaling_changes_the_size() -> None:
+    """The ablation seam must actually alter sizing, or the three arms are the same run."""
+    from tradebot.analytics.features import Features
+    from tradebot.analytics.signals import Regime, RegimeState
+    from tradebot.analytics.sizing import SizingConfig, size_position
+
+    calm = Regime(RegimeState.CALM, 1.0, 0.1, 0.2, 0.5, False)
+    features = Features("X", "stock", 300, 100.0, vol_20=1.0, atr_pct=0.005)
+
+    scaled = size_position(features, calm, config=SizingConfig(vol_scaling=True))
+    unscaled = size_position(features, calm, config=SizingConfig(vol_scaling=False))
+
+    assert scaled.weight != unscaled.weight
+    assert scaled.vol_weight < unscaled.vol_weight
+
+
+async def test_the_three_arms_actually_produce_different_results(
+    context: AppContext, clock: FrozenClock
+) -> None:
+    """An ablation whose arms cannot differ measures nothing.
+
+    Volatility scaling only bites when instruments differ in volatility, and the trend filter
+    only bites when something is falling, so the universe has to contain both.
+    """
+    await seed(context, "SPY", daily=0.0008, count=400, asset_class="index", end=LAST_BAR)
+    await seed(context, "CALM", daily=0.002, count=400, spread=0.002, end=LAST_BAR)
+    await seed(context, "WILD", daily=0.002, count=400, spread=0.05, end=LAST_BAR)
+    await seed(context, "FALLING", daily=-0.002, count=400, spread=0.01, end=LAST_BAR)
+    portfolio_id = await make_portfolio(context, clock)
+
+    async with context.db.session() as session:
+        portfolio = await session.get(Portfolio, portfolio_id)
+        portfolio.strategy = {"sizing": {"risk_per_trade": 0.05, "max_position_weight": 0.5}}
+        report = await BacktestService(context.events).ablate_scaling(
+            session, portfolio, LAST_BAR - timedelta(days=120), LAST_BAR
+        )
+
+    returns = {item.label: item.performance.total_return for item in report.strategies}
+    orders = {item.label: item.orders for item in report.strategies}
+
+    assert all(count > 0 for count in orders.values()), f"an arm never traded: {orders}"
+    assert len(set(returns.values())) > 1, (
+        f"all three arms returned the same figure, so the ablation measured nothing: {returns}"
+    )

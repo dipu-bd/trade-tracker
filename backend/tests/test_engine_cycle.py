@@ -32,6 +32,7 @@ async def seed(
     asset_class: str = "stock",
     volume: Decimal = Decimal(3_000_000),
     name: str = "",
+    spread: float = 0.01,
     end: object = None,
 ) -> int:
     last = end or LAST_BAR
@@ -54,8 +55,8 @@ async def seed(
                     instrument_id=instrument.id,
                     bar_date=last - timedelta(days=count - 1 - offset),  # type: ignore[operator]
                     open=price,
-                    high=price * Decimal("1.01"),
-                    low=price * Decimal("0.99"),
+                    high=price * (Decimal(1) + Decimal(str(spread))),
+                    low=price * (Decimal(1) - Decimal(str(spread))),
                     close=price,
                     volume=volume,
                     source="test",

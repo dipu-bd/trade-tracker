@@ -134,6 +134,61 @@ class BacktestService:
         )
         return report
 
+    async def ablate_scaling(
+        self,
+        session: AsyncSession,
+        portfolio: Portfolio,
+        start: date,
+        end: date,
+    ) -> BacktestReport:
+        """Signal alone, scaling alone, both — over identical sessions and one trial count.
+
+        The plan singles this out because replications attribute much of time-series momentum's
+        measured benefit to the volatility scaling rather than to the momentum signal. If the
+        scaling arm matches or beats the full strategy, that is a finding about *this* strategy
+        and the verdict says so rather than burying it.
+        """
+        arms = {
+            "signal_only": {"require_trend": True, "sizing": {"vol_scaling": False}},
+            "scaling_only": {"require_trend": False, "sizing": {"vol_scaling": True}},
+            "both": {"require_trend": True, "sizing": {"vol_scaling": True}},
+        }
+
+        days = await trading_days(session, portfolio.benchmark, start, end)
+        report = BacktestReport(start=start, end=end)
+        if len(days) < 2:
+            report.notes.append(f"No usable calendar for {portfolio.benchmark}.")
+            return report
+
+        for _ in arms:
+            self._trials.record(strategy_config(portfolio))
+        trials = self._trials.trials
+        report.trials = trials
+
+        outcomes: dict[str, float] = {}
+        for name, overrides in arms.items():
+            sandbox = await self._sandbox(session, portfolio, days[0])
+            sandbox.strategy = {**(portfolio.strategy or {}), **_merge(overrides)}
+            await session.flush()
+
+            result = await ReplayRunner(self._events).run(session, sandbox, days, label=name)
+            summary = summarise(result, trials)
+            report.strategies.append(summary)
+            outcomes[name] = summary.performance.total_return
+            await self._cleanup(session, sandbox)
+
+        report.benchmark = summarise(
+            await buy_and_hold(
+                session, portfolio.benchmark, days, capital=float(portfolio.initial_capital)
+            ),
+            1,
+        )
+        report.notes.append(_scaling_verdict(outcomes))
+        report.notes.append(
+            f"All three arms ran the same {len(days)} sessions under one trial count ({trials})."
+        )
+        return report
+
     async def leakage_check(
         self,
         session: AsyncSession,
@@ -213,3 +268,40 @@ class BacktestService:
 
 def _at(day: date) -> datetime:
     return datetime.combine(day, time(21, 0), tzinfo=UTC)
+
+
+def _merge(overrides: dict[str, object]) -> dict[str, object]:
+    return dict(overrides)
+
+
+def _scaling_verdict(outcomes: dict[str, float]) -> str:
+    """Name which component produced the return, in plain words."""
+    if len(outcomes) < 3:
+        return "Ablation incomplete."
+
+    signal = outcomes.get("signal_only", 0.0)
+    scaling = outcomes.get("scaling_only", 0.0)
+    both = outcomes.get("both", 0.0)
+    best = max(outcomes, key=lambda key: outcomes[key])
+
+    parts = [
+        f"Signal alone {signal:+.2%}, scaling alone {scaling:+.2%}, both {both:+.2%}.",
+    ]
+    if best == "scaling_only":
+        parts.append(
+            "The VOLATILITY SCALING is doing the work: it beat the momentum signal alone and the "
+            "full strategy. The momentum signal is not earning its place on this window."
+        )
+    elif best == "signal_only":
+        parts.append(
+            "The MOMENTUM SIGNAL is doing the work: volatility scaling did not add to it, and "
+            "the full strategy did not beat the signal on its own."
+        )
+    elif scaling >= both * 0.9:
+        parts.append(
+            "The scaling alone captured most of the full strategy's return, which is what the "
+            "replications warn about — treat the momentum signal's contribution as unproven."
+        )
+    else:
+        parts.append("Both components contributed; neither reproduces the result alone.")
+    return " ".join(parts)

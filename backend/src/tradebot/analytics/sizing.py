@@ -16,6 +16,11 @@ class SizingConfig:
     min_position_weight: float = 0.005
     max_vol_scalar: float = 1.5
 
+    # Ablation seams. Defaults leave the strategy exactly as it trades; flipping one off is how
+    # the backtester asks which component is actually producing the return.
+    vol_scaling: bool = True
+    unscaled_weight: float = 1.0
+
 
 @dataclass(frozen=True, slots=True)
 class Sizing:
@@ -62,7 +67,10 @@ def size_position(
     config = config or SizingConfig()
     confidence = max(0.0, min(confidence, 1.0))
 
-    vol_weight = vol_scalar(features, config.target_vol, config.max_vol_scalar)
+    if config.vol_scaling:
+        vol_weight = vol_scalar(features, config.target_vol, config.max_vol_scalar)
+    else:
+        vol_weight = config.unscaled_weight
     stop_distance = config.atr_stop_multiple * features.atr_pct
 
     atr_cap = 0.0 if stop_distance <= 0 else config.risk_per_trade / stop_distance

@@ -13,6 +13,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -186,7 +187,17 @@ class Position(Base, TimestampMixin):
     __tablename__ = "positions"
     __table_args__ = (
         Index("ix_positions_portfolio_status", "portfolio_id", "status"),
-        UniqueConstraint("portfolio_id", "instrument_id", "status", name="uq_open_position"),
+        # Partial: at most one OPEN position per instrument, but any number of CLOSED ones.
+        # Spanning `status` instead would forbid ever re-entering a name already exited once,
+        # which is precisely what a momentum strategy does.
+        Index(
+            "uq_open_position",
+            "portfolio_id",
+            "instrument_id",
+            unique=True,
+            sqlite_where=text("status = 'OPEN'"),
+            postgresql_where=text("status = 'OPEN'"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

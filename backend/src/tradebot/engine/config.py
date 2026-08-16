@@ -49,6 +49,7 @@ def strategy_config(portfolio: Portfolio) -> StrategyConfig:
             impact_coefficient=float(stored.get("impact_coefficient", 0.1)),
         ),
         benchmark=portfolio.benchmark,
+        require_trend=bool(stored.get("require_trend", True)),
         **sections,
     )
 
