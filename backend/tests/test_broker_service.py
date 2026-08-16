@@ -533,3 +533,115 @@ async def test_reconciliation_passes_after_a_full_trading_sequence(
 
     assert_ok(report)
     assert report.cash_projected == report.cash_replayed
+
+
+async def test_seeding_a_holding_debits_cash_and_opens_a_position(
+    context: AppContext, broker: BrokerService
+) -> None:
+    ids = await setup(context)
+
+    async with context.db.session() as session:
+        portfolio = await session.get(Portfolio, ids[0])
+        instrument = await session.get(Instrument, ids[1])
+        order = await broker.seed_holding(
+            session,
+            portfolio=portfolio,
+            instrument=instrument,
+            qty=Decimal(10),
+            cost_basis=Decimal(100),
+            opened_at=NOW,
+        )
+        cash = await broker.cash(session, portfolio.id)
+        position = await broker._open_position(session, portfolio.id, instrument.id)
+
+    assert order.status == OrderStatus.FILLED
+    assert cash == CAPITAL - Decimal(1000)
+    assert position is not None
+    assert position.qty == Decimal(10)
+    assert position.avg_cost == Decimal(100)
+
+
+async def test_a_seeded_holding_charges_no_slippage_or_commission(
+    context: AppContext,
+) -> None:
+    """The trade happened at another broker, which already took its cut."""
+    clock = FrozenClock(NOW)
+    service = BrokerService(Ledger(clock=clock), context.events, clock=clock)
+    ids = await setup(context, slippage_bps=Decimal(50), commission_bps=Decimal(20))
+
+    async with context.db.session() as session:
+        portfolio = await session.get(Portfolio, ids[0])
+        instrument = await session.get(Instrument, ids[1])
+        await service.seed_holding(
+            session,
+            portfolio=portfolio,
+            instrument=instrument,
+            qty=Decimal(10),
+            cost_basis=Decimal(100),
+            opened_at=NOW,
+        )
+        cash = await service.cash(session, portfolio.id)
+
+    assert cash == CAPITAL - Decimal(1000), "cost basis must be exactly what was entered"
+
+
+async def test_a_seeded_holding_reconciles_against_a_ledger_replay(
+    context: AppContext, broker: BrokerService
+) -> None:
+    ids = await setup(context)
+
+    async with context.db.session() as session:
+        portfolio = await session.get(Portfolio, ids[0])
+        instrument = await session.get(Instrument, ids[1])
+        await broker.seed_holding(
+            session,
+            portfolio=portfolio,
+            instrument=instrument,
+            qty=Decimal(4),
+            cost_basis=Decimal(250),
+            opened_at=NOW,
+        )
+        assert_ok(await reconcile(session, Ledger(clock=FrozenClock(NOW)), portfolio.id))
+
+
+async def test_a_seeded_holding_can_then_be_sold_normally(
+    context: AppContext, broker: BrokerService
+) -> None:
+    ids = await setup(context)
+
+    async with context.db.session() as session:
+        portfolio = await session.get(Portfolio, ids[0])
+        instrument = await session.get(Instrument, ids[1])
+        await broker.seed_holding(
+            session,
+            portfolio=portfolio,
+            instrument=instrument,
+            qty=Decimal(10),
+            cost_basis=Decimal(100),
+            opened_at=NOW,
+        )
+
+    await sell(context, broker, ids, "10", "120")
+
+    async with context.db.session() as session:
+        position = await broker._open_position(session, ids[0], ids[1])
+        assert position is None, "selling the seeded quantity closes the position"
+
+
+async def test_seeding_more_than_the_cash_allows_is_rejected(
+    context: AppContext, broker: BrokerService
+) -> None:
+    ids = await setup(context)
+
+    async with context.db.session() as session:
+        portfolio = await session.get(Portfolio, ids[0])
+        instrument = await session.get(Instrument, ids[1])
+        with pytest.raises(ValidationError):
+            await broker.seed_holding(
+                session,
+                portfolio=portfolio,
+                instrument=instrument,
+                qty=Decimal(10_000),
+                cost_basis=Decimal(100),
+                opened_at=NOW,
+            )

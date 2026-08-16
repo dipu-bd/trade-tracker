@@ -460,6 +460,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/portfolios/{portfolio_id}/holdings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Seed Holding
+         * @description Record a position you already hold, at the cost basis you actually paid.
+         *
+         *     Cash is debited so the equity curve stays honest, but no slippage or commission is charged:
+         *     the trade happened elsewhere and already cost what it cost.
+         */
+        post: operations["seed_holding_api_portfolios__portfolio_id__holdings_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/portfolios/{portfolio_id}/strategy": {
         parameters: {
             query?: never;
@@ -650,6 +673,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/portfolios/{portfolio_id}/ai/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Models
+         * @description The two-tier model configuration. Never includes an API key — only which one to use.
+         */
+        get: operations["get_models_api_portfolios__portfolio_id__ai_models_get"];
+        /**
+         * Update Models
+         * @description Replace the model configuration.
+         *
+         *     Rejected rather than silently stored when a named credential is absent, because an endpoint
+         *     with no key fails at the next cycle instead of at the moment the mistake was made.
+         */
+        put: operations["update_models_api_portfolios__portfolio_id__ai_models_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portfolios/{portfolio_id}/ai/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Select Profile
+         * @description Point this portfolio at a saved model profile, or clear the link.
+         */
+        put: operations["select_profile_api_portfolios__portfolio_id__ai_profile_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/portfolios/{portfolio_id}/ai/summary": {
         parameters: {
             query?: never;
@@ -684,6 +754,51 @@ export interface paths {
          * @description Ask about this portfolio. Read-only: there is no path from here to the broker.
          */
         post: operations["analyst_chat_api_portfolios__portfolio_id__chat_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portfolios/{portfolio_id}/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Notifications
+         * @description Whether Slack is wired up for this portfolio. The URL itself is never returned.
+         */
+        get: operations["get_notifications_api_portfolios__portfolio_id__notifications_get"];
+        /**
+         * Set Notifications
+         * @description Store this portfolio's Slack webhook, encrypted beside the API keys.
+         */
+        put: operations["set_notifications_api_portfolios__portfolio_id__notifications_put"];
+        post?: never;
+        /** Clear Notifications */
+        delete: operations["clear_notifications_api_portfolios__portfolio_id__notifications_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/portfolios/{portfolio_id}/notifications/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Notifications
+         * @description Post a message now, so a wrong URL is found here rather than at the next fill.
+         */
+        post: operations["test_notifications_api_portfolios__portfolio_id__notifications_test_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -811,6 +926,54 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/model-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Profiles
+         * @description Every saved model setup, with how many portfolios use each.
+         */
+        get: operations["list_profiles_api_model_profiles_get"];
+        put?: never;
+        /**
+         * Create Profile
+         * @description Save a named model setup that portfolios can then pick.
+         */
+        post: operations["create_profile_api_model_profiles_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/model-profiles/{profile_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Profile
+         * @description Replace a profile. Every portfolio pointing at it changes with it.
+         */
+        put: operations["update_profile_api_model_profiles__profile_id__put"];
+        post?: never;
+        /**
+         * Delete Profile
+         * @description Portfolios using it fall back to their own stored config rather than breaking.
+         */
+        delete: operations["delete_profile_api_model_profiles__profile_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1208,6 +1371,59 @@ export interface components {
             /** Error */
             error: string | null;
         };
+        /** EndpointLimits */
+        EndpointLimits: {
+            /**
+             * Rpm
+             * @description Requests per minute, 0 for unlimited.
+             * @default 0
+             */
+            rpm: number;
+            /**
+             * Rpd
+             * @description Requests per day, 0 for unlimited.
+             * @default 0
+             */
+            rpd: number;
+            /**
+             * Tpm
+             * @description Tokens per minute, 0 for unlimited.
+             * @default 0
+             */
+            tpm: number;
+            /**
+             * Concurrency
+             * @default 4
+             */
+            concurrency: number;
+        };
+        /**
+         * EndpointSettings
+         * @description One OpenAI-compatible target. No secret here — `credential` names a stored key.
+         */
+        EndpointSettings: {
+            /**
+             * Base Url
+             * @description OpenAI-compatible base URL, e.g. https://api.groq.com/openai/v1
+             */
+            base_url: string;
+            /**
+             * Model
+             * @description Model id as the provider names it.
+             */
+            model: string;
+            /**
+             * Credential
+             * @description Provider key of the stored credential holding this endpoint's API key.
+             */
+            credential: string;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
+            limits?: components["schemas"]["EndpointLimits"];
+        };
         /** EventOut */
         EventOut: {
             /** Id */
@@ -1280,6 +1496,26 @@ export interface components {
             env: string;
             /** Database */
             database: string;
+        };
+        /**
+         * HoldingSeed
+         * @description A position already owned elsewhere, mirrored into the paper portfolio.
+         */
+        HoldingSeed: {
+            /** Symbol */
+            symbol: string;
+            /** Qty */
+            qty: number | string;
+            /**
+             * Cost Basis
+             * @description Price per unit actually paid.
+             */
+            cost_basis: number | string;
+            /**
+             * Opened At
+             * @description When it was bought. Defaults to now.
+             */
+            opened_at?: string | null;
         };
         /** InstrumentOut */
         InstrumentOut: {
@@ -1365,6 +1601,134 @@ export interface components {
             email: string;
             /** Password */
             password: string;
+        };
+        /**
+         * ModelProfileIn
+         * @description A reusable model setup. Named once, then picked by any number of portfolios.
+         */
+        ModelProfileIn: {
+            /** Name */
+            name: string;
+            quick?: components["schemas"]["EndpointSettings"] | null;
+            quick_fallback?: components["schemas"]["EndpointSettings"] | null;
+            deep?: components["schemas"]["EndpointSettings"] | null;
+            deep_fallback?: components["schemas"]["EndpointSettings"] | null;
+            /**
+             * Quality
+             * @default balanced
+             */
+            quality: string;
+            /**
+             * Deliberation
+             * @default firm_debate
+             */
+            deliberation: string;
+        };
+        /** ModelProfileOut */
+        ModelProfileOut: {
+            /** Name */
+            name: string;
+            quick?: components["schemas"]["EndpointSettings"] | null;
+            quick_fallback?: components["schemas"]["EndpointSettings"] | null;
+            deep?: components["schemas"]["EndpointSettings"] | null;
+            deep_fallback?: components["schemas"]["EndpointSettings"] | null;
+            /**
+             * Quality
+             * @default balanced
+             */
+            quality: string;
+            /**
+             * Deliberation
+             * @default firm_debate
+             */
+            deliberation: string;
+            /** Id */
+            id: number;
+            /**
+             * Missing Credentials
+             * @default []
+             */
+            missing_credentials: string[];
+            /**
+             * Used By
+             * @default 0
+             */
+            used_by: number;
+        };
+        /**
+         * ModelSettings
+         * @description Two tiers, each with an optional fallback for when a free tier is exhausted.
+         */
+        ModelSettings: {
+            quick?: components["schemas"]["EndpointSettings"] | null;
+            quick_fallback?: components["schemas"]["EndpointSettings"] | null;
+            deep?: components["schemas"]["EndpointSettings"] | null;
+            deep_fallback?: components["schemas"]["EndpointSettings"] | null;
+            /**
+             * Ai Enabled
+             * @default false
+             */
+            ai_enabled: boolean;
+            /**
+             * Quality
+             * @default balanced
+             */
+            quality: string;
+            /**
+             * Deliberation
+             * @default firm_debate
+             */
+            deliberation: string;
+        };
+        /** ModelSummary */
+        ModelSummary: {
+            quick?: components["schemas"]["EndpointSettings"] | null;
+            quick_fallback?: components["schemas"]["EndpointSettings"] | null;
+            deep?: components["schemas"]["EndpointSettings"] | null;
+            deep_fallback?: components["schemas"]["EndpointSettings"] | null;
+            /**
+             * Ai Enabled
+             * @default false
+             */
+            ai_enabled: boolean;
+            /**
+             * Quality
+             * @default balanced
+             */
+            quality: string;
+            /**
+             * Deliberation
+             * @default firm_debate
+             */
+            deliberation: string;
+            /** Configured */
+            configured: boolean;
+            /** Missing Credentials */
+            missing_credentials: string[];
+            /** Profile Id */
+            profile_id?: number | null;
+            /**
+             * Profile Name
+             * @default
+             */
+            profile_name: string;
+        };
+        /** NotificationIn */
+        NotificationIn: {
+            /** Webhook Url */
+            webhook_url: string;
+        };
+        /**
+         * NotificationOut
+         * @description The webhook URL is a secret in its own right, so only its mask comes back.
+         */
+        NotificationOut: {
+            /** Configured */
+            configured: boolean;
+            /** Masked */
+            masked: string;
+            /** Kinds */
+            kinds: string[];
         };
         /** OrderCreate */
         OrderCreate: {
@@ -1539,6 +1903,19 @@ export interface components {
             /** Unrealized Pnl */
             unrealized_pnl?: string | null;
         };
+        /** ProfileSelection */
+        ProfileSelection: {
+            /**
+             * Profile Id
+             * @description Profile to use, or null to clear the link.
+             */
+            profile_id?: number | null;
+            /**
+             * Ai Enabled
+             * @default false
+             */
+            ai_enabled: boolean;
+        };
         /**
          * ProviderStatusOut
          * @description What the provider-health dashboard renders. Never contains a credential value.
@@ -1701,6 +2078,10 @@ export interface components {
             };
             /** Costs */
             costs: {
+                [key: string]: unknown;
+            };
+            /** Universe */
+            universe?: {
                 [key: string]: unknown;
             };
         };
@@ -2559,6 +2940,41 @@ export interface operations {
             };
         };
     };
+    seed_holding_api_portfolios__portfolio_id__holdings_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HoldingSeed"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrderOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_strategy_api_portfolios__portfolio_id__strategy_get: {
         parameters: {
             query?: never;
@@ -2915,6 +3331,107 @@ export interface operations {
             };
         };
     };
+    get_models_api_portfolios__portfolio_id__ai_models_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_models_api_portfolios__portfolio_id__ai_models_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelSettings"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    select_profile_api_portfolios__portfolio_id__ai_profile_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProfileSelection"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_ai_summary_api_portfolios__portfolio_id__ai_summary_get: {
         parameters: {
             query?: never;
@@ -2970,6 +3487,132 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChatReply"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_notifications_api_portfolios__portfolio_id__notifications_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_notifications_api_portfolios__portfolio_id__notifications_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotificationIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_notifications_api_portfolios__portfolio_id__notifications_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_notifications_api_portfolios__portfolio_id__notifications_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationOut"];
                 };
             };
             /** @description Validation Error */
@@ -3166,6 +3809,123 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ScheduledJob"][];
+                };
+            };
+        };
+    };
+    list_profiles_api_model_profiles_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelProfileOut"][];
+                };
+            };
+        };
+    };
+    create_profile_api_model_profiles_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelProfileIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelProfileOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_profile_api_model_profiles__profile_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelProfileIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelProfileOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_profile_api_model_profiles__profile_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

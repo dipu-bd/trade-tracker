@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
 import { api } from '@/api/client'
 import { useProviders } from '@/api/hooks'
@@ -32,6 +32,8 @@ interface ModelSummary {
   deliberation: string
   configured: boolean
   missing_credentials: string[]
+  profile_id: number | null
+  profile_name: string
 }
 
 const TIERS = ['quick', 'quick_fallback', 'deep', 'deep_fallback'] as const
@@ -48,12 +50,16 @@ export function Settings({ portfolioId }: { portfolioId: number | null }) {
   return (
     <div className="grid gap-4">
       <CredentialsCard />
+      <ProfilesCard />
       {portfolioId === null ? (
-        <Card title="AI models">
-          <Empty>Create a portfolio first — model configuration is per portfolio.</Empty>
+        <Card title="This portfolio">
+          <Empty>Create a portfolio first — the model profile is chosen per portfolio.</Empty>
         </Card>
       ) : (
-        <ModelsCard portfolioId={portfolioId} />
+        <>
+          <ModelsCard portfolioId={portfolioId} />
+          <NotificationsCard portfolioId={portfolioId} />
+        </>
       )}
       <ProvidersCard />
     </div>
@@ -184,6 +190,283 @@ function blank(): EndpointSettings {
   }
 }
 
+interface ModelProfile {
+  id: number
+  name: string
+  quick: EndpointSettings | null
+  quick_fallback: EndpointSettings | null
+  deep: EndpointSettings | null
+  deep_fallback: EndpointSettings | null
+  quality: string
+  deliberation: string
+  missing_credentials: string[]
+  used_by: number
+}
+
+function emptyProfile(): ModelProfile {
+  return {
+    id: 0,
+    name: '',
+    quick: null,
+    quick_fallback: null,
+    deep: null,
+    deep_fallback: null,
+    quality: 'balanced',
+    deliberation: 'firm_debate',
+    missing_credentials: [],
+    used_by: 0,
+  }
+}
+
+interface NotificationState {
+  configured: boolean
+  masked: string
+  kinds: string[]
+}
+
+function NotificationsCard({ portfolioId }: { portfolioId: number }) {
+  const client = useQueryClient()
+  const key = ['notifications', portfolioId]
+  const state = useQuery({
+    queryKey: key,
+    queryFn: () => api<NotificationState>(`/portfolios/${portfolioId}/notifications`),
+  })
+  const [url, setUrl] = useState('')
+
+  const invalidate = () => void client.invalidateQueries({ queryKey: key })
+
+  const save = useMutation({
+    mutationFn: () =>
+      api<NotificationState>(`/portfolios/${portfolioId}/notifications`, {
+        method: 'PUT',
+        body: JSON.stringify({ webhook_url: url }),
+      }),
+    onSuccess: () => {
+      setUrl('')
+      invalidate()
+    },
+  })
+
+  const clear = useMutation({
+    mutationFn: () =>
+      api<void>(`/portfolios/${portfolioId}/notifications`, { method: 'DELETE' }),
+    onSuccess: invalidate,
+  })
+
+  const test = useMutation({
+    mutationFn: () =>
+      api<NotificationState>(`/portfolios/${portfolioId}/notifications/test`, { method: 'POST' }),
+  })
+
+  return (
+    <Card title="Slack notifications">
+      <p className="mb-3 text-sm text-[var(--color-ink-muted)]">
+        One webhook per portfolio. The URL is stored encrypted like an API key and is never
+        returned by the API. Posts on: {state.data?.kinds.join(', ') ?? '—'}.
+      </p>
+
+      <div className="grid items-end gap-3 sm:grid-cols-4">
+        <div className="sm:col-span-2">
+          <Field label="Incoming webhook URL">
+            <input
+              type="password"
+              className={inputClass}
+              value={url}
+              onChange={(event) => setUrl(event.target.value)}
+              placeholder="https://hooks.slack.com/services/..."
+              autoComplete="off"
+            />
+          </Field>
+        </div>
+        <Button variant="primary" disabled={save.isPending || !url} onClick={() => save.mutate()}>
+          {save.isPending ? 'Saving…' : 'Save webhook'}
+        </Button>
+        <div className="flex gap-2">
+          <Button
+            disabled={!state.data?.configured || test.isPending}
+            onClick={() => test.mutate()}
+          >
+            {test.isPending ? 'Sending…' : 'Send test'}
+          </Button>
+          {state.data?.configured && (
+            <Button variant="ghost" onClick={() => clear.mutate()}>
+              Remove
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <p className="mt-3 text-sm">
+        {state.data?.configured ? (
+          <>
+            Configured — <code>{state.data.masked}</code>
+          </>
+        ) : (
+          <span className="text-[var(--color-ink-muted)]">Not configured.</span>
+        )}
+      </p>
+      {save.error && (
+        <p className="mt-2 text-sm text-[var(--color-loss)]">{(save.error as Error).message}</p>
+      )}
+      {test.error && (
+        <p className="mt-2 text-sm text-[var(--color-loss)]">{(test.error as Error).message}</p>
+      )}
+      {test.isSuccess && !test.isPending && (
+        <p className="mt-2 text-sm text-[var(--color-ink-muted)]">Test message sent.</p>
+      )}
+    </Card>
+  )
+}
+
+function ProfilesCard() {
+  const client = useQueryClient()
+  const profiles = useQuery({
+    queryKey: ['model-profiles'],
+    queryFn: () => api<ModelProfile[]>('/model-profiles'),
+  })
+  const [draft, setDraft] = useState<ModelProfile | null>(null)
+
+  const invalidate = () => {
+    void client.invalidateQueries({ queryKey: ['model-profiles'] })
+    void client.invalidateQueries({ queryKey: ['ai-models'] })
+  }
+
+  const save = useMutation({
+    mutationFn: (body: ModelProfile) => {
+      const payload = {
+        name: body.name,
+        quick: body.quick,
+        quick_fallback: body.quick_fallback,
+        deep: body.deep,
+        deep_fallback: body.deep_fallback,
+        quality: body.quality,
+        deliberation: body.deliberation,
+      }
+      return body.id
+        ? api<ModelProfile>(`/model-profiles/${body.id}`, {
+            method: 'PUT',
+            body: JSON.stringify(payload),
+          })
+        : api<ModelProfile>('/model-profiles', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+          })
+    },
+    onSuccess: () => {
+      setDraft(null)
+      invalidate()
+    },
+  })
+
+  const remove = useMutation({
+    mutationFn: (id: number) => api<void>(`/model-profiles/${id}`, { method: 'DELETE' }),
+    onSuccess: invalidate,
+  })
+
+  return (
+    <Card title="Model profiles">
+      <p className="mb-3 text-sm text-[var(--color-ink-muted)]">
+        Configure a model setup once and point any number of portfolios at it. Editing a profile
+        changes every portfolio using it.
+      </p>
+
+      {profiles.data?.length ? (
+        <Table head={['Name', 'Deep model', 'Quality', 'Strategy', 'Used by', '']}>
+          {profiles.data.map((row) => (
+            <Row key={row.id}>
+              <Cell mono>{row.name}</Cell>
+              <Cell mono>{row.deep?.model ?? '—'}</Cell>
+              <Cell>{row.quality}</Cell>
+              <Cell className="text-xs">{row.deliberation}</Cell>
+              <Cell mono>{row.used_by}</Cell>
+              <Cell>
+                <div className="flex gap-1">
+                  <Button variant="ghost" onClick={() => setDraft({ ...row })}>
+                    Edit
+                  </Button>
+                  <Button variant="ghost" onClick={() => remove.mutate(row.id)}>
+                    Delete
+                  </Button>
+                </div>
+              </Cell>
+            </Row>
+          ))}
+        </Table>
+      ) : (
+        <Empty>No model profiles yet.</Empty>
+      )}
+
+      {draft === null ? (
+        <div className="mt-3">
+          <Button variant="primary" onClick={() => setDraft(emptyProfile())}>
+            New profile
+          </Button>
+        </div>
+      ) : (
+        <div className="mt-4 border-t border-[var(--color-border-subtle)] pt-4">
+          <div className="mb-3 grid gap-3 sm:grid-cols-3">
+            <Field label="Profile name">
+              <input
+                className={inputClass}
+                value={draft.name}
+                onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+                placeholder="Gemini free tier"
+              />
+            </Field>
+            <Field label="Quality">
+              <select
+                className={inputClass}
+                value={draft.quality}
+                onChange={(event) => setDraft({ ...draft, quality: event.target.value })}
+              >
+                <option value="economy">economy — technical only, single call</option>
+                <option value="balanced">balanced — technical + news, one debate</option>
+                <option value="thorough">thorough — every analyst, two rounds</option>
+              </select>
+            </Field>
+            <Field label="Deliberation">
+              <select
+                className={inputClass}
+                value={draft.deliberation}
+                onChange={(event) => setDraft({ ...draft, deliberation: event.target.value })}
+              >
+                <option value="single_call">single_call</option>
+                <option value="firm_debate">firm_debate</option>
+                <option value="multi_round_debate">multi_round_debate</option>
+              </select>
+            </Field>
+          </div>
+
+          <div className="grid gap-4">
+            {TIERS.map((tier) => (
+              <EndpointForm
+                key={tier}
+                tier={tier}
+                value={draft[tier]}
+                onChange={(next) => setDraft({ ...draft, [tier]: next })}
+              />
+            ))}
+          </div>
+
+          {save.error && (
+            <p className="mt-3 text-sm text-[var(--color-loss)]">
+              {(save.error as Error).message}
+            </p>
+          )}
+          <div className="mt-4 flex gap-3">
+            <Button variant="primary" disabled={save.isPending} onClick={() => save.mutate(draft)}>
+              {save.isPending ? 'Saving…' : draft.id ? 'Update profile' : 'Create profile'}
+            </Button>
+            <Button variant="ghost" onClick={() => setDraft(null)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+    </Card>
+  )
+}
+
 function ModelsCard({ portfolioId }: { portfolioId: number }) {
   const client = useQueryClient()
   const key = ['ai-models', portfolioId]
@@ -191,107 +474,80 @@ function ModelsCard({ portfolioId }: { portfolioId: number }) {
     queryKey: key,
     queryFn: () => api<ModelSummary>(`/portfolios/${portfolioId}/ai/models`),
   })
+  const profiles = useQuery({
+    queryKey: ['model-profiles'],
+    queryFn: () => api<ModelProfile[]>('/model-profiles'),
+  })
 
-  const [draft, setDraft] = useState<ModelSummary | null>(null)
-  useEffect(() => {
-    if (stored.data) setDraft(stored.data)
-  }, [stored.data])
-
-  const save = useMutation({
-    mutationFn: (body: ModelSummary) =>
-      api<ModelSummary>(`/portfolios/${portfolioId}/ai/models`, {
+  const select = useMutation({
+    mutationFn: (body: { profile_id: number | null; ai_enabled: boolean }) =>
+      api<ModelSummary>(`/portfolios/${portfolioId}/ai/profile`, {
         method: 'PUT',
-        body: JSON.stringify({
-          quick: body.quick,
-          quick_fallback: body.quick_fallback,
-          deep: body.deep,
-          deep_fallback: body.deep_fallback,
-          ai_enabled: body.ai_enabled,
-          quality: body.quality,
-          deliberation: body.deliberation,
-        }),
+        body: JSON.stringify(body),
       }),
     onSuccess: () => void client.invalidateQueries({ queryKey: key }),
   })
 
-  if (!draft) return <Card title="AI models">Loading…</Card>
-
-  const patch = (changes: Partial<ModelSummary>) => setDraft({ ...draft, ...changes })
+  const current = stored.data
+  if (!current) return <Card title="This portfolio">Loading…</Card>
 
   return (
-    <Card title="AI models">
-      <p className="mb-4 text-sm text-[var(--color-ink-muted)]">
-        Two tiers per portfolio. Any OpenAI-compatible endpoint works — base URL, model id, and
-        the provider key of a credential stored above. The key itself is read from the vault at
-        the point of use and never stored here.
-      </p>
-
-      {draft.missing_credentials.length > 0 && (
-        <p className="mb-3 text-sm text-[var(--color-loss)]">
-          No stored credential named: {draft.missing_credentials.join(', ')}
-        </p>
-      )}
-
-      <div className="mb-4 grid gap-3 sm:grid-cols-3">
-        <Field label="Quality">
+    <Card title="This portfolio">
+      <div className="grid items-end gap-3 sm:grid-cols-3">
+        <Field label="Model profile">
           <select
             className={inputClass}
-            value={draft.quality}
-            onChange={(event) => patch({ quality: event.target.value })}
+            value={current.profile_id ?? ''}
+            onChange={(event) =>
+              select.mutate({
+                profile_id: event.target.value ? Number(event.target.value) : null,
+                ai_enabled: current.ai_enabled,
+              })
+            }
           >
-            <option value="economy">economy — technical only, single call</option>
-            <option value="balanced">balanced — technical + news, one debate</option>
-            <option value="thorough">thorough — every analyst, two rounds</option>
-          </select>
-        </Field>
-        <Field label="Deliberation">
-          <select
-            className={inputClass}
-            value={draft.deliberation}
-            onChange={(event) => patch({ deliberation: event.target.value })}
-          >
-            <option value="single_call">single_call</option>
-            <option value="firm_debate">firm_debate</option>
-            <option value="multi_round_debate">multi_round_debate</option>
+            <option value="">— none (rules only) —</option>
+            {profiles.data?.map((row) => (
+              <option key={row.id} value={row.id}>
+                {row.name}
+              </option>
+            ))}
           </select>
         </Field>
         <Field label="AI enabled">
           <label className="flex items-center gap-2 py-2 text-sm">
             <input
               type="checkbox"
-              checked={draft.ai_enabled}
-              onChange={(event) => patch({ ai_enabled: event.target.checked })}
+              checked={current.ai_enabled}
+              disabled={select.isPending}
+              onChange={(event) =>
+                select.mutate({
+                  profile_id: current.profile_id,
+                  ai_enabled: event.target.checked,
+                })
+              }
             />
             Let the model meta-label trades
           </label>
         </Field>
+        <div className="text-sm text-[var(--color-ink-muted)]">
+          {current.configured
+            ? `Deep: ${current.deep?.model ?? '—'} (${current.quality})`
+            : 'No deep model — cycles run rules-only.'}
+        </div>
       </div>
 
-      <div className="grid gap-4">
-        {TIERS.map((tier) => (
-          <EndpointForm
-            key={tier}
-            tier={tier}
-            value={draft[tier]}
-            onChange={(next) => patch({ [tier]: next } as Partial<ModelSummary>)}
-          />
-        ))}
-      </div>
-
-      {save.error && (
-        <p className="mt-3 text-sm text-[var(--color-loss)]">{(save.error as Error).message}</p>
+      {current.missing_credentials.length > 0 && (
+        <p className="mt-3 text-sm text-[var(--color-loss)]">
+          No stored credential named: {current.missing_credentials.join(', ')}
+        </p>
       )}
-      <div className="mt-4 flex items-center gap-3">
-        <Button variant="primary" disabled={save.isPending} onClick={() => save.mutate(draft)}>
-          {save.isPending ? 'Saving…' : 'Save models'}
-        </Button>
-        {save.isSuccess && !save.isPending && (
-          <span className="text-sm text-[var(--color-ink-muted)]">Saved.</span>
-        )}
-      </div>
+      {select.error && (
+        <p className="mt-3 text-sm text-[var(--color-loss)]">{(select.error as Error).message}</p>
+      )}
     </Card>
   )
 }
+
 
 function EndpointForm({
   tier,

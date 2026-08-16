@@ -1,8 +1,93 @@
 import { useState } from 'react'
 
 import { useAISummary, useApplyPreset, useLessons, usePresets, useSchedule, useStrategy } from '@/api/hooks'
-import { Badge, Button, Card, Cell, Empty, Row, Stat, Table } from '@/components/ui'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+
+import { api } from '@/api/client'
+import { Badge, Button, Card, Cell, Empty, Field, Row, Stat, Table, inputClass } from '@/components/ui'
 import { percent, when } from '@/lib/format'
+
+
+interface UniverseSpec {
+  asset_classes?: string[]
+  always?: string[]
+  never?: string[]
+  max_symbols?: number
+}
+
+function UniverseCard({ id }: { id: number }) {
+  const client = useQueryClient()
+  const strategy = useStrategy(id)
+  const [always, setAlways] = useState<string | null>(null)
+  const [never, setNever] = useState<string | null>(null)
+
+  const spec: UniverseSpec = (strategy.data?.universe ?? {}) as UniverseSpec
+  const alwaysValue = always ?? (spec.always ?? []).join(', ')
+  const neverValue = never ?? (spec.never ?? []).join(', ')
+
+  const save = useMutation({
+    mutationFn: () => {
+      const parse = (text: string) =>
+        text
+          .split(/[,\s]+/)
+          .map((item) => item.trim().toUpperCase())
+          .filter(Boolean)
+      return api(`/portfolios/${id}/strategy`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          benchmark: strategy.data?.benchmark ?? 'SPY',
+          cadence: strategy.data?.cadence ?? 'daily',
+          autopilot: strategy.data?.autopilot ?? false,
+          strategy: {},
+          universe: {
+            ...spec,
+            always: parse(alwaysValue),
+            never: parse(neverValue),
+          },
+        }),
+      })
+    },
+    onSuccess: () => {
+      setAlways(null)
+      setNever(null)
+      void client.invalidateQueries({ queryKey: ['strategy', id] })
+    },
+  })
+
+  return (
+    <Card title="Pinned symbols">
+      <p className="mb-3 text-sm text-[var(--color-ink-muted)]">
+        Always: names the engine considers every cycle regardless of the screen. Never: names it
+        must not buy. A held position is always considered even if listed here, or it could never
+        be sold. Comma or space separated; the symbol must already be tracked.
+      </p>
+      <div className="grid items-end gap-3 sm:grid-cols-3">
+        <Field label="Always consider">
+          <input
+            className={inputClass}
+            value={alwaysValue}
+            onChange={(event) => setAlways(event.target.value)}
+            placeholder="AAPL, MSFT"
+          />
+        </Field>
+        <Field label="Never buy">
+          <input
+            className={inputClass}
+            value={neverValue}
+            onChange={(event) => setNever(event.target.value)}
+            placeholder="TQQQ"
+          />
+        </Field>
+        <Button variant="primary" disabled={save.isPending} onClick={() => save.mutate()}>
+          {save.isPending ? 'Saving…' : 'Save pins'}
+        </Button>
+      </div>
+      {save.error && (
+        <p className="mt-3 text-sm text-[var(--color-loss)]">{(save.error as Error).message}</p>
+      )}
+    </Card>
+  )
+}
 
 export function StrategyPage({ id }: { id: number }) {
   const strategy = useStrategy(id)
@@ -15,6 +100,8 @@ export function StrategyPage({ id }: { id: number }) {
 
   return (
     <div className="grid gap-4">
+      <UniverseCard id={id} />
+
       <Card title="Configuration wizard">
         <p className="mb-3 text-sm text-[var(--color-ink-muted)]">
           A preset is a starting point, not a recommendation. Every value it sets is a degree of

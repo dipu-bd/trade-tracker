@@ -135,3 +135,14 @@ class ReconciliationOut(BaseModel):
     ok: bool
     cash: Decimal
     problems: list[str]
+
+
+class HoldingSeed(BaseModel):
+    """A position already owned elsewhere, mirrored into the paper portfolio."""
+
+    symbol: str = Field(min_length=1, max_length=32)
+    qty: Decimal = Field(gt=0)
+    cost_basis: Decimal = Field(gt=0, description="Price per unit actually paid.")
+    opened_at: datetime | None = Field(
+        default=None, description="When it was bought. Defaults to now."
+    )

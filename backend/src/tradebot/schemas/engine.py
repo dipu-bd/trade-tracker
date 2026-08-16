@@ -24,6 +24,7 @@ class StrategySummary(BaseModel):
     exits: dict[str, Any]
     turnover: dict[str, Any]
     costs: dict[str, Any]
+    universe: dict[str, Any] = Field(default_factory=dict)
 
 
 class DecisionRunOut(BaseModel):

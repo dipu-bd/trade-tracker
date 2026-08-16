@@ -1,4 +1,7 @@
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
+
+import { api } from '@/api/client'
 import {
   CartesianGrid,
   Line,
@@ -200,6 +203,144 @@ export function PortfolioDetailPage({ id }: { id: number }) {
   )
 }
 
+
+function TradeCard({ id }: { id: number }) {
+  const client = useQueryClient()
+  const [mode, setMode] = useState<'order' | 'holding'>('order')
+  const [symbol, setSymbol] = useState('')
+  const [side, setSide] = useState('BUY')
+  const [qty, setQty] = useState('')
+  const [cost, setCost] = useState('')
+  const [openedAt, setOpenedAt] = useState('')
+
+  const refresh = () => {
+    for (const key of ['orders', 'fills', 'ledger', 'portfolio', 'positions']) {
+      void client.invalidateQueries({ queryKey: [key, id] })
+    }
+  }
+
+  const submit = useMutation({
+    mutationFn: () =>
+      mode === 'order'
+        ? api(`/portfolios/${id}/orders`, {
+            method: 'POST',
+            body: JSON.stringify({ symbol: symbol.toUpperCase(), side, qty }),
+          })
+        : api(`/portfolios/${id}/holdings`, {
+            method: 'POST',
+            body: JSON.stringify({
+              symbol: symbol.toUpperCase(),
+              qty,
+              cost_basis: cost,
+              opened_at: openedAt ? new Date(openedAt).toISOString() : null,
+            }),
+          }),
+    onSuccess: () => {
+      setSymbol('')
+      setQty('')
+      setCost('')
+      refresh()
+    },
+  })
+
+  return (
+    <Card title="Trade manually">
+      <div className="mb-3 flex gap-1">
+        {(['order', 'holding'] as const).map((item) => (
+          <button
+            key={item}
+            type="button"
+            onClick={() => setMode(item)}
+            className={`rounded px-2.5 py-1 text-sm transition ${
+              mode === item
+                ? 'bg-[var(--color-surface-raised)] font-medium'
+                : 'text-[var(--color-ink-muted)]'
+            }`}
+          >
+            {item === 'order' ? 'Place an order' : 'Seed a holding I already own'}
+          </button>
+        ))}
+      </div>
+
+      <p className="mb-3 text-sm text-[var(--color-ink-muted)]">
+        {mode === 'order'
+          ? 'A market order alongside whatever the engine does. It fills against the next quote and pays the portfolio’s slippage and commission.'
+          : 'Records a position bought elsewhere at the price you actually paid. Cash is debited so the equity curve stays honest, but no slippage or commission is charged — that broker already took its cut.'}
+      </p>
+
+      <form
+        className="grid items-end gap-3 sm:grid-cols-5"
+        onSubmit={(event) => {
+          event.preventDefault()
+          submit.mutate()
+        }}
+      >
+        <Field label="Symbol">
+          <input
+            className={inputClass}
+            value={symbol}
+            onChange={(event) => setSymbol(event.target.value)}
+            placeholder="AAPL"
+            required
+          />
+        </Field>
+        {mode === 'order' && (
+          <Field label="Side">
+            <select
+              className={inputClass}
+              value={side}
+              onChange={(event) => setSide(event.target.value)}
+            >
+              <option value="BUY">BUY</option>
+              <option value="SELL">SELL</option>
+            </select>
+          </Field>
+        )}
+        <Field label="Quantity">
+          <input
+            className={inputClass}
+            value={qty}
+            onChange={(event) => setQty(event.target.value)}
+            placeholder="10"
+            required
+          />
+        </Field>
+        {mode === 'holding' && (
+          <>
+            <Field label="Cost basis per unit">
+              <input
+                className={inputClass}
+                value={cost}
+                onChange={(event) => setCost(event.target.value)}
+                placeholder="182.50"
+                required
+              />
+            </Field>
+            <Field label="Bought on">
+              <input
+                type="date"
+                className={inputClass}
+                value={openedAt}
+                onChange={(event) => setOpenedAt(event.target.value)}
+              />
+            </Field>
+          </>
+        )}
+        <Button type="submit" variant="primary" disabled={submit.isPending}>
+          {submit.isPending ? 'Working…' : mode === 'order' ? 'Submit order' : 'Add holding'}
+        </Button>
+      </form>
+
+      {submit.error && (
+        <p className="mt-3 text-sm text-[var(--color-loss)]">{(submit.error as Error).message}</p>
+      )}
+      {submit.isSuccess && !submit.isPending && (
+        <p className="mt-3 text-sm text-[var(--color-ink-muted)]">Done — see the blotter below.</p>
+      )}
+    </Card>
+  )
+}
+
 export function Blotter({ id }: { id: number }) {
   const orders = useOrders(id)
   const fills = useFills(id)
@@ -207,6 +348,8 @@ export function Blotter({ id }: { id: number }) {
 
   return (
     <div className="grid gap-4">
+      <TradeCard id={id} />
+
       <Card title="Orders">
         {orders.data?.length ? (
           <Table head={['#', 'Side', 'Qty', 'Type', 'Status', 'Avg fill', 'Reason']}>

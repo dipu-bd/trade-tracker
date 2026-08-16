@@ -394,3 +394,132 @@ async def test_an_unknown_quality_or_strategy_is_rejected(
 
     assert response.status_code == 422
     assert "turbo" in response.text
+
+
+async def create_profile(client: AsyncClient, headers: dict[str, str], name: str = "Cheap") -> int:
+    response = await client.post(
+        "/api/model-profiles",
+        json={
+            "name": name,
+            "quick": {"base_url": QUICK, "model": "gpt-5-mini", "credential": "openrouter"},
+            "deep": {"base_url": DEEP, "model": "gpt-5", "credential": "openrouter"},
+            "quality": "balanced",
+            "deliberation": "firm_debate",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    return int(response.json()["id"])
+
+
+async def test_a_portfolio_can_point_at_a_named_profile(
+    client: AsyncClient, registered: dict[str, str], portfolio_id: int
+) -> None:
+    await seed_credentials(client, registered)
+    profile_id = await create_profile(client, registered)
+
+    selected = await client.put(
+        f"/api/portfolios/{portfolio_id}/ai/profile",
+        json={"profile_id": profile_id, "ai_enabled": True},
+        headers=registered,
+    )
+    body = selected.json()
+
+    assert selected.status_code == 200, selected.text
+    assert body["profile_id"] == profile_id
+    assert body["profile_name"] == "Cheap"
+    assert body["deep"]["model"] == "gpt-5"
+    assert body["configured"] is True
+
+
+async def test_editing_a_profile_changes_every_portfolio_using_it(
+    client: AsyncClient, registered: dict[str, str], portfolio_id: int
+) -> None:
+    """The whole point of naming it once rather than copying it."""
+    await seed_credentials(client, registered)
+    profile_id = await create_profile(client, registered)
+    await client.put(
+        f"/api/portfolios/{portfolio_id}/ai/profile",
+        json={"profile_id": profile_id, "ai_enabled": True},
+        headers=registered,
+    )
+
+    await client.put(
+        f"/api/model-profiles/{profile_id}",
+        json={
+            "name": "Cheap",
+            "deep": {"base_url": DEEP, "model": "gpt-5-turbo", "credential": "openrouter"},
+            "quality": "thorough",
+            "deliberation": "single_call",
+        },
+        headers=registered,
+    )
+    after = await client.get(f"/api/portfolios/{portfolio_id}/ai/models", headers=registered)
+
+    assert after.json()["deep"]["model"] == "gpt-5-turbo"
+    assert after.json()["quality"] == "thorough"
+
+
+async def test_deleting_a_profile_leaves_the_portfolio_working(
+    client: AsyncClient, registered: dict[str, str], portfolio_id: int
+) -> None:
+    """SET NULL, not cascade: losing a preset must not delete the portfolio."""
+    await seed_credentials(client, registered)
+    profile_id = await create_profile(client, registered)
+    await client.put(
+        f"/api/portfolios/{portfolio_id}/ai/profile",
+        json={"profile_id": profile_id, "ai_enabled": True},
+        headers=registered,
+    )
+
+    removed = await client.delete(f"/api/model-profiles/{profile_id}", headers=registered)
+    after = await client.get(f"/api/portfolios/{portfolio_id}/ai/models", headers=registered)
+
+    assert removed.status_code == 204
+    assert after.status_code == 200
+    assert after.json()["profile_id"] is None
+
+
+async def test_profiles_report_how_many_portfolios_use_them(
+    client: AsyncClient, registered: dict[str, str], portfolio_id: int
+) -> None:
+    await seed_credentials(client, registered)
+    profile_id = await create_profile(client, registered)
+    await client.put(
+        f"/api/portfolios/{portfolio_id}/ai/profile",
+        json={"profile_id": profile_id, "ai_enabled": True},
+        headers=registered,
+    )
+
+    listed = await client.get("/api/model-profiles", headers=registered)
+    row = listed.json()[0]
+
+    assert row["used_by"] == 1
+    assert row["missing_credentials"] == []
+
+
+async def test_a_duplicate_profile_name_is_rejected(
+    client: AsyncClient, registered: dict[str, str], portfolio_id: int
+) -> None:
+    await seed_credentials(client, registered)
+    await create_profile(client, registered, "Cheap")
+
+    response = await client.post(
+        "/api/model-profiles",
+        json={"name": "Cheap", "quality": "balanced", "deliberation": "firm_debate"},
+        headers=registered,
+    )
+
+    assert response.status_code == 409
+
+
+async def test_another_users_profile_cannot_be_selected(
+    client: AsyncClient, registered: dict[str, str], portfolio_id: int
+) -> None:
+    response = await client.put(
+        f"/api/portfolios/{portfolio_id}/ai/profile",
+        json={"profile_id": 9999, "ai_enabled": False},
+        headers=registered,
+    )
+
+    assert response.status_code == 404

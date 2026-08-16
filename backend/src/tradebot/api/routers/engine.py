@@ -44,6 +44,7 @@ async def get_strategy(portfolio_id: int, user: CurrentUser, session: DbSession)
         autopilot=portfolio.autopilot,
         parameter_count=parameter_count(config),
         costs=asdict(config.costs),
+        universe=dict(portfolio.universe or {}),
         **{name: _serialisable(getattr(config, name)) for name in SECTIONS},
     )
 

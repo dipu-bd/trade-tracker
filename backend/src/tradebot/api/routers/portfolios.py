@@ -21,6 +21,7 @@ from tradebot.db.models import (
 )
 from tradebot.schemas.broker import (
     FillOut,
+    HoldingSeed,
     LedgerEntryOut,
     OrderCreate,
     OrderOut,
@@ -271,3 +272,36 @@ async def run_reconciliation(
         cash=report.cash_replayed,
         problems=report.problems,
     )
+
+
+@router.post(
+    "/{portfolio_id}/holdings", response_model=OrderOut, status_code=status.HTTP_201_CREATED
+)
+async def seed_holding(
+    portfolio_id: int,
+    body: HoldingSeed,
+    user: CurrentUser,
+    context: Context,
+    session: DbSession,
+) -> OrderOut:
+    """Record a position you already hold, at the cost basis you actually paid.
+
+    Cash is debited so the equity curve stays honest, but no slippage or commission is charged:
+    the trade happened elsewhere and already cost what it cost.
+    """
+    portfolio = await load_portfolio(session, portfolio_id, user.id)
+    instrument = await session.scalar(
+        select(Instrument).where(Instrument.symbol == body.symbol.upper())
+    )
+    if instrument is None:
+        raise NotFoundError(f"instrument not tracked: {body.symbol.upper()}")
+
+    order = await _broker(context).seed_holding(
+        session,
+        portfolio=portfolio,
+        instrument=instrument,
+        qty=body.qty,
+        cost_basis=body.cost_basis,
+        opened_at=body.opened_at or context.clock.now(),
+    )
+    return OrderOut.model_validate(order)

@@ -69,6 +69,25 @@ class PositionStatus:
     CLOSED = "CLOSED"
 
 
+class ModelProfile(Base, TimestampMixin):
+    """A named model setup shared by any number of portfolios.
+
+    Held by reference rather than copied into each portfolio, so editing the profile changes
+    every portfolio using it — which is the whole point of naming it once.
+    """
+
+    __tablename__ = "model_profiles"
+    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_model_profile_name"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+
+    endpoints: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    quality: Mapped[str] = mapped_column(String(16), default="balanced")
+    deliberation: Mapped[str] = mapped_column(String(32), default="firm_debate")
+
+
 class Portfolio(Base, TimestampMixin):
     __tablename__ = "portfolios"
     __table_args__ = (UniqueConstraint("user_id", "name", name="uq_portfolio_name"),)
@@ -90,6 +109,9 @@ class Portfolio(Base, TimestampMixin):
     quality: Mapped[str] = mapped_column(String(16), default="balanced")
     deliberation: Mapped[str] = mapped_column(String(32), default="firm_debate")
     models: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    model_profile_id: Mapped[int | None] = mapped_column(
+        ForeignKey("model_profiles.id", ondelete="SET NULL"), default=None, index=True
+    )
     cadence: Mapped[str] = mapped_column(String(32), default="daily")
     autopilot: Mapped[bool] = mapped_column(Boolean, default=False)
     strategy: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)

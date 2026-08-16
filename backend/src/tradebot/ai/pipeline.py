@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tradebot.ai import guardrails
 from tradebot.ai.analysts import AnalystCache, AnalystKind, AnalystPool
 from tradebot.ai.client import AIClient, Endpoint, ModelTier
+from tradebot.ai.config import ModelConfig, resolve
 from tradebot.ai.deliberation import (
     STRATEGIES,
     DeliberationResult,
@@ -104,10 +105,10 @@ def endpoint_from(raw: dict[str, object] | None, api_key: str) -> Endpoint | Non
 
 
 def tiers_for(
-    portfolio: Portfolio, keys: dict[str, str]
+    source: "Portfolio | ModelConfig", keys: dict[str, str]
 ) -> tuple[ModelTier | None, ModelTier | None]:
     """Build the quick and deep tiers from stored config plus vault-resolved keys."""
-    config = dict(portfolio.models or {})
+    config = dict(source.endpoints if isinstance(source, ModelConfig) else source.models or {})
 
     def build(name: str) -> ModelTier | None:
         raw = config.get(name)
@@ -141,10 +142,10 @@ class AIPipeline:
         self._cache = cache or AnalystCache()
 
     def strategy_for(
-        self, portfolio: Portfolio, quick: ModelTier | None, deep: ModelTier
+        self, models: ModelConfig, quick: ModelTier | None, deep: ModelTier
     ) -> DeliberationStrategy:
-        profile = QUALITY_PROFILES.get(portfolio.quality, QUALITY_PROFILES["balanced"])
-        name = portfolio.deliberation or profile.strategy
+        profile = QUALITY_PROFILES.get(models.quality, QUALITY_PROFILES["balanced"])
+        name = models.deliberation or profile.strategy
         kind = STRATEGIES.get(name, STRATEGIES["firm_debate"])
 
         if kind is SingleCall or quick is None:
@@ -175,12 +176,13 @@ class AIPipeline:
         if not decision.entries:
             return AIOutcome(enabled=True, reason="no candidates to judge")
 
-        quick, deep = tiers_for(portfolio, keys)
+        models = await resolve(session, portfolio)
+        quick, deep = tiers_for(models, keys)
         if deep is None:
             return AIOutcome(enabled=True, reason="no deep model configured")
 
         lessons = await recall(session, portfolio.id, [e.symbol for e in decision.entries])
-        strategy = self.strategy_for(portfolio, quick, deep)
+        strategy = self.strategy_for(models, quick, deep)
         result = await strategy.run(as_of, decision, state, features, lessons, capabilities)
 
         await self._audit(session, portfolio, result, correlation_id, run_id)

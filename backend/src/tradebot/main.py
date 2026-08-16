@@ -15,6 +15,7 @@ from tradebot.core.errors import TradebotError
 from tradebot.core.logging import configure_logging, get_logger
 from tradebot.core.settings import Settings, get_settings
 from tradebot.obs import metrics
+from tradebot.obs.slack import SlackNotifier, WebhookLookup
 from tradebot.workers.scheduler import EngineScheduler
 
 _log = get_logger(__name__)
@@ -27,13 +28,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     scheduler = EngineScheduler(context)
     app.state.scheduler = scheduler
+    notifier = SlackNotifier(context.bus, WebhookLookup(context))
+    app.state.notifier = notifier
     if context.settings.scheduler_enabled:
         scheduler.start()
+        notifier.start()
 
     try:
         yield
     finally:
         scheduler.shutdown()
+        await notifier.aclose()
         await context.aclose()
         _log.info("shutdown")
 

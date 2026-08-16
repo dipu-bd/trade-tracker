@@ -141,3 +141,44 @@ class ModelSettings(BaseModel):
 class ModelSummary(ModelSettings):
     configured: bool
     missing_credentials: list[str]
+    profile_id: int | None = None
+    profile_name: str = ""
+
+
+class ModelProfileIn(BaseModel):
+    """A reusable model setup. Named once, then picked by any number of portfolios."""
+
+    name: str = Field(min_length=1, max_length=120)
+    quick: EndpointSettings | None = None
+    quick_fallback: EndpointSettings | None = None
+    deep: EndpointSettings | None = None
+    deep_fallback: EndpointSettings | None = None
+    quality: str = "balanced"
+    deliberation: str = "firm_debate"
+
+
+class ModelProfileOut(ModelProfileIn):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    missing_credentials: list[str] = []
+    used_by: int = 0
+
+
+class ProfileSelection(BaseModel):
+    profile_id: int | None = Field(
+        default=None, description="Profile to use, or null to clear the link."
+    )
+    ai_enabled: bool = False
+
+
+class NotificationIn(BaseModel):
+    webhook_url: str = Field(min_length=1, max_length=500)
+
+
+class NotificationOut(BaseModel):
+    """The webhook URL is a secret in its own right, so only its mask comes back."""
+
+    configured: bool
+    masked: str
+    kinds: list[str]

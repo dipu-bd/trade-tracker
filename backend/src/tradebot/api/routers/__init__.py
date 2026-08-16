@@ -10,6 +10,7 @@ from tradebot.api.routers import (
     market,
     observability,
     portfolios,
+    profiles,
 )
 
 api_router = APIRouter()
@@ -22,6 +23,7 @@ api_router.include_router(engine.router)
 api_router.include_router(ai.router)
 api_router.include_router(backtest.router)
 api_router.include_router(engine.schedule_router)
+api_router.include_router(profiles.router)
 api_router.include_router(observability.router)
 
 __all__ = ["api_router"]

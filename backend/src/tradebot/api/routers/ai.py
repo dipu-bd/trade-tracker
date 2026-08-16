@@ -1,16 +1,32 @@
 from typing import Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Query, Request, status
 from sqlalchemy import func, select
 
 from tradebot.ai.chat import AnalystChat
 from tradebot.ai.client import AIClient
+from tradebot.ai.config import resolve as resolve_models
 from tradebot.ai.deliberation import STRATEGIES
 from tradebot.ai.pipeline import QUALITY_PROFILES, tiers_for
 from tradebot.api.deps import Context, CurrentUser, DbSession
 from tradebot.broker.service import load_portfolio
 from tradebot.core.errors import NotFoundError, ValidationError
-from tradebot.db.models import AICall, DecisionRun, Lesson, Portfolio
+from tradebot.db.models import (
+    AICall,
+    Credential,
+    DecisionRun,
+    Lesson,
+    ModelProfile,
+    Portfolio,
+)
+from tradebot.obs.bus import BusEvent
+from tradebot.obs.slack import (
+    NOTIFIED,
+    WEBHOOK_FIELD,
+    WEBHOOK_PROVIDER,
+    SlackNotifier,
+    WebhookLookup,
+)
 from tradebot.schemas.ai import (
     AICallDetail,
     AICallOut,
@@ -22,6 +38,9 @@ from tradebot.schemas.ai import (
     LessonOut,
     ModelSettings,
     ModelSummary,
+    NotificationIn,
+    NotificationOut,
+    ProfileSelection,
 )
 
 router = APIRouter(prefix="/portfolios", tags=["ai"])
@@ -157,12 +176,12 @@ async def get_models(
 ) -> ModelSummary:
     """The two-tier model configuration. Never includes an API key — only which one to use."""
     portfolio = await load_portfolio(session, portfolio_id, user.id)
-    stored = dict(portfolio.models or {})
+    models = await resolve_models(session, portfolio)
     settings = ModelSettings(
-        **{name: stored.get(name) for name in TIERS},
+        **{name: models.endpoints.get(name) for name in TIERS},
         ai_enabled=portfolio.ai_enabled,
-        quality=portfolio.quality,
-        deliberation=portfolio.deliberation,
+        quality=models.quality,
+        deliberation=models.deliberation,
     )
 
     available = set(await context.providers.llm_keys(session, user.id))
@@ -173,8 +192,10 @@ async def get_models(
     }
     return ModelSummary(
         **settings.model_dump(),
-        configured=bool(stored),
+        configured=models.configured,
         missing_credentials=sorted(wanted - available),
+        profile_id=models.profile_id,
+        profile_name=models.profile_name,
     )
 
 
@@ -212,9 +233,36 @@ async def update_models(
         for name in TIERS
         if (endpoint := getattr(body, name)) is not None
     }
+    # Editing the per-portfolio config is a deliberate step away from a shared profile.
+    portfolio.model_profile_id = None
     portfolio.ai_enabled = body.ai_enabled
     portfolio.quality = body.quality
     portfolio.deliberation = body.deliberation
+    await session.flush()
+
+    return await get_models(portfolio_id, user, context, session)
+
+
+@router.put("/{portfolio_id}/ai/profile", response_model=ModelSummary)
+async def select_profile(
+    portfolio_id: int,
+    body: ProfileSelection,
+    user: CurrentUser,
+    context: Context,
+    session: DbSession,
+) -> ModelSummary:
+    """Point this portfolio at a saved model profile, or clear the link."""
+    portfolio = await load_portfolio(session, portfolio_id, user.id)
+
+    if body.profile_id is not None:
+        profile = await session.get(ModelProfile, body.profile_id)
+        if profile is None or profile.user_id != user.id:
+            raise NotFoundError(f"model profile {body.profile_id} not found")
+        if body.ai_enabled and not (profile.endpoints or {}).get("deep"):
+            raise ValidationError(f"profile {profile.name!r} has no deep model")
+
+    portfolio.model_profile_id = body.profile_id
+    portfolio.ai_enabled = body.ai_enabled
     await session.flush()
 
     return await get_models(portfolio_id, user, context, session)
@@ -262,7 +310,7 @@ async def analyst_chat(
     portfolio = await load_portfolio(session, portfolio_id, user.id)
 
     keys = await context.providers.llm_keys(session, user.id)
-    quick, deep = tiers_for(portfolio, keys)
+    quick, deep = tiers_for(await resolve_models(session, portfolio), keys)
     tier = quick or deep
     if tier is None:
         raise ValidationError("no model configured for this portfolio")
@@ -275,3 +323,90 @@ async def analyst_chat(
         [(item.role, item.content) for item in body.history],
     )
     return ChatReply(reply=reply, grounded_on=sources, model=model, cost_usd=cost)
+
+
+@router.get("/{portfolio_id}/notifications", response_model=NotificationOut)
+async def get_notifications(
+    portfolio_id: int, user: CurrentUser, context: Context, session: DbSession
+) -> NotificationOut:
+    """Whether Slack is wired up for this portfolio. The URL itself is never returned."""
+    await load_portfolio(session, portfolio_id, user.id)
+    record = await session.scalar(
+        select(Credential).where(
+            Credential.user_id == user.id,
+            Credential.provider_key == WEBHOOK_PROVIDER,
+            Credential.field == WEBHOOK_FIELD,
+            Credential.label == str(portfolio_id),
+        )
+    )
+    return NotificationOut(
+        configured=record is not None,
+        masked=record.masked if record else "",
+        kinds=sorted(NOTIFIED),
+    )
+
+
+@router.put("/{portfolio_id}/notifications", response_model=NotificationOut)
+async def set_notifications(
+    portfolio_id: int,
+    body: NotificationIn,
+    user: CurrentUser,
+    context: Context,
+    session: DbSession,
+) -> NotificationOut:
+    """Store this portfolio's Slack webhook, encrypted beside the API keys."""
+    await load_portfolio(session, portfolio_id, user.id)
+    url = body.webhook_url.strip()
+    if not url.startswith("https://hooks.slack.com/"):
+        raise ValidationError("expected a https://hooks.slack.com/... webhook URL")
+
+    await context.vault.store(
+        session,
+        user_id=user.id,
+        provider_key=WEBHOOK_PROVIDER,
+        field=WEBHOOK_FIELD,
+        secret=url,
+        label=str(portfolio_id),
+    )
+    return await get_notifications(portfolio_id, user, context, session)
+
+
+@router.delete("/{portfolio_id}/notifications", status_code=status.HTTP_204_NO_CONTENT)
+async def clear_notifications(portfolio_id: int, user: CurrentUser, session: DbSession) -> None:
+    await load_portfolio(session, portfolio_id, user.id)
+    record = await session.scalar(
+        select(Credential).where(
+            Credential.user_id == user.id,
+            Credential.provider_key == WEBHOOK_PROVIDER,
+            Credential.field == WEBHOOK_FIELD,
+            Credential.label == str(portfolio_id),
+        )
+    )
+    if record is not None:
+        await session.delete(record)
+        await session.flush()
+
+
+@router.post("/{portfolio_id}/notifications/test", response_model=NotificationOut)
+async def test_notifications(
+    portfolio_id: int, user: CurrentUser, context: Context, session: DbSession
+) -> NotificationOut:
+    """Post a message now, so a wrong URL is found here rather than at the next fill."""
+    await load_portfolio(session, portfolio_id, user.id)
+    current = await get_notifications(portfolio_id, user, context, session)
+    if not current.configured:
+        raise ValidationError("no webhook configured for this portfolio")
+
+    notifier = SlackNotifier(context.bus, WebhookLookup(context))
+    try:
+        await notifier.deliver(
+            BusEvent(
+                domain="engine",
+                kind="cycle_finished",
+                portfolio_id=portfolio_id,
+                message="test message from tradebot",
+            )
+        )
+    finally:
+        await notifier.aclose()
+    return current

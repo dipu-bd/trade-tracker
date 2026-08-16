@@ -372,6 +372,71 @@ class BrokerService:
         )
         return FillResult(order.id, qty, price, fee, realized)
 
+    async def seed_holding(
+        self,
+        session: AsyncSession,
+        *,
+        portfolio: Portfolio,
+        instrument: Instrument,
+        qty: Decimal,
+        cost_basis: Decimal,
+        opened_at: datetime,
+    ) -> Order:
+        """Record a position already held elsewhere, at its real cost basis.
+
+        Goes through the ordinary fill settlement rather than inserting a Position directly, so
+        the cash ledger, the lots and the position projection stay reconcilable. Costs are not
+        charged: the trade happened at a broker that already took its cut, and adding slippage
+        here would make the stated cost basis wrong.
+        """
+        if qty <= ZERO or cost_basis <= ZERO:
+            raise ValidationError("quantity and cost basis must both be positive")
+
+        notional = quantize_cash(qty * cost_basis)
+        if notional > await self._ledger.balance(session, portfolio.id):
+            raise ValidationError("not enough cash to seed this holding at that cost basis")
+
+        order = Order(
+            portfolio_id=portfolio.id,
+            instrument_id=instrument.id,
+            side=Side.BUY,
+            order_type=OrderType.MARKET,
+            time_in_force=TimeInForce.DAY,
+            qty=qty,
+            status=OrderStatus.NEW,
+            client_order_id=f"seed:{portfolio.id}:{instrument.id}:{opened_at.isoformat()}",
+            submitted_at=opened_at,
+        )
+        session.add(order)
+        await session.flush()
+
+        order_rules.transition(order, OrderStatus.ACCEPTED, at=opened_at)
+        fill = Fill(
+            order_id=order.id,
+            seq=1,
+            qty=qty,
+            price=cost_basis,
+            fee=ZERO,
+            slippage_amount=ZERO,
+            executed_at=opened_at,
+        )
+        session.add(fill)
+        await session.flush()
+
+        await self._settle_buy(session, portfolio, instrument, fill, notional, ZERO)
+        order_rules.record_fill(order, qty, cost_basis, at=opened_at)
+        await session.flush()
+
+        await self._record(
+            session,
+            portfolio,
+            "holding_seeded",
+            order,
+            message=f"{qty} {instrument.symbol} @ {cost_basis}",
+            payload={"qty": str(qty), "price": str(cost_basis)},
+        )
+        return order
+
     async def _affordable_qty(
         self,
         session: AsyncSession,
