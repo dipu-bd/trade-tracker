@@ -18,21 +18,10 @@ async def test_events_can_be_filtered_by_kind(
     assert [row["kind"] for row in response.json()] == ["login"]
 
 
-async def test_events_are_scoped_to_the_requesting_user(client: AsyncClient) -> None:
-    await client.post(
-        "/api/auth/register",
-        json={"email": "a@example.com", "password": "password-long-enough", "display_name": "A"},
-    )
-    await client.post(
-        "/api/auth/register",
-        json={"email": "b@example.com", "password": "password-long-enough", "display_name": "B"},
-    )
-    login = await client.post(
-        "/api/auth/login", json={"email": "b@example.com", "password": "password-long-enough"}
-    )
-    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
-
-    response = await client.get("/api/events", headers=headers)
+async def test_events_are_scoped_to_the_requesting_user(
+    client: AsyncClient, registered: dict[str, str], other_user: dict[str, str]
+) -> None:
+    response = await client.get("/api/events", headers=other_user)
     assert response.json()
     assert all(row["kind"] in {"user_registered", "login"} for row in response.json())
 

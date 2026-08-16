@@ -3,7 +3,8 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -89,6 +90,23 @@ def _register_error_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=exc.status_code,
             content={"error": {"code": exc.code, "message": exc.message}},
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def handle_validation_error(
+        _request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        # Without this a 422 keeps FastAPI's `detail` shape, and the client reads the envelope
+        # it never finds as an empty message — HTTP/2 has no status text to fall back on.
+        details = "; ".join(
+            f"{'.'.join(str(part) for part in error['loc'][1:])}: {error['msg']}"
+            for error in exc.errors()
+        )
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={
+                "error": {"code": "validation_error", "message": details or "invalid request"}
+            },
         )
 
 

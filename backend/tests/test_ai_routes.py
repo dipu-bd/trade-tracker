@@ -267,23 +267,12 @@ async def test_ai_routes_require_authentication(client: AsyncClient, portfolio_i
 
 
 async def test_another_users_ai_calls_are_not_visible(
-    client: AsyncClient, registered: dict[str, str], portfolio_id: int
+    client: AsyncClient,
+    registered: dict[str, str],
+    portfolio_id: int,
+    other_user: dict[str, str],
 ) -> None:
-    await client.post(
-        "/api/auth/register",
-        json={
-            "email": "other@example.com",
-            "password": "correct-horse-battery-staple",
-            "display_name": "Other",
-        },
-    )
-    login = await client.post(
-        "/api/auth/login",
-        json={"email": "other@example.com", "password": "correct-horse-battery-staple"},
-    )
-    other = {"Authorization": f"Bearer {login.json()['access_token']}"}
-
-    response = await client.get(f"/api/portfolios/{portfolio_id}/ai/calls", headers=other)
+    response = await client.get(f"/api/portfolios/{portfolio_id}/ai/calls", headers=other_user)
 
     assert response.status_code == 404
 

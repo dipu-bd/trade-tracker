@@ -22,16 +22,26 @@ async def test_register_returns_user_without_password(client: AsyncClient) -> No
 
 async def test_first_account_becomes_admin(client: AsyncClient) -> None:
     first = await client.post("/api/auth/register", json=REGISTER)
-    second = await client.post("/api/auth/register", json={**REGISTER, "email": "bob@example.com"})
     assert first.json()["is_admin"] is True
-    assert second.json()["is_admin"] is False
 
 
-async def test_duplicate_email_conflicts(client: AsyncClient) -> None:
+async def test_registration_closes_once_an_account_exists(client: AsyncClient) -> None:
     await client.post("/api/auth/register", json=REGISTER)
-    response = await client.post("/api/auth/register", json=REGISTER)
-    assert response.status_code == 409
-    assert response.json()["error"]["code"] == "conflict"
+    response = await client.post(
+        "/api/auth/register", json={**REGISTER, "email": "bob@example.com"}
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "forbidden"
+
+
+async def test_a_closed_instance_cannot_be_probed_for_existing_accounts(
+    client: AsyncClient,
+) -> None:
+    await client.post("/api/auth/register", json=REGISTER)
+    known = await client.post("/api/auth/register", json=REGISTER)
+    unknown = await client.post("/api/auth/register", json={**REGISTER, "email": "bob@example.com"})
+    assert known.status_code == unknown.status_code == 403
+    assert known.json() == unknown.json()
 
 
 async def test_email_is_normalized_to_lowercase(client: AsyncClient) -> None:
@@ -45,6 +55,14 @@ async def test_email_is_normalized_to_lowercase(client: AsyncClient) -> None:
 async def test_short_password_is_rejected(client: AsyncClient) -> None:
     response = await client.post("/api/auth/register", json={**REGISTER, "password": "short"})
     assert response.status_code == 422
+
+
+async def test_a_validation_error_names_the_field_and_the_rule(client: AsyncClient) -> None:
+    response = await client.post("/api/auth/register", json={**REGISTER, "password": "short"})
+    error = response.json()["error"]
+    assert error["code"] == "validation_error"
+    assert "password" in error["message"]
+    assert "12" in error["message"]
 
 
 async def test_login_issues_access_token_and_refresh_cookie(client: AsyncClient) -> None:

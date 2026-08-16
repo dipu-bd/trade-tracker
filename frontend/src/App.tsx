@@ -192,8 +192,12 @@ function LoginScreen() {
               className={inputClass}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
+              minLength={mode === 'register' ? 12 : undefined}
               required
             />
+            {mode === 'register' && (
+              <p className="mt-1 text-xs text-[var(--color-muted)]">At least 12 characters.</p>
+            )}
           </Field>
           {error && <p className="text-sm text-[var(--color-loss)]">{error}</p>}
           <Button type="submit" variant="primary" disabled={busy}>

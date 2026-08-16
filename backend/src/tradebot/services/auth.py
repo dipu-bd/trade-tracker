@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tradebot.core import security
-from tradebot.core.errors import AuthenticationError, ConflictError
+from tradebot.core.errors import AuthenticationError, ConflictError, ForbiddenError
 from tradebot.core.settings import Settings
 from tradebot.db.models import Session, User
 
@@ -17,11 +17,15 @@ class AuthService:
         self, session: AsyncSession, *, email: str, password: str, display_name: str
     ) -> User:
         email = email.strip().lower()
+        is_first = (await session.scalar(select(User.id).limit(1))) is None
+        if not is_first:
+            # Checked before the email lookup so a closed instance cannot be probed for accounts.
+            raise ForbiddenError("registration is closed")
+
         existing = await session.scalar(select(User).where(User.email == email))
         if existing is not None:
             raise ConflictError("an account with that email already exists")
 
-        is_first = (await session.scalar(select(User.id).limit(1))) is None
         user = User(
             email=email,
             password_hash=security.hash_password(password),

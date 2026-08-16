@@ -60,24 +60,12 @@ async def test_zero_capital_is_rejected(client: AsyncClient, registered: dict[st
 
 
 async def test_another_users_portfolio_is_not_visible(
-    client: AsyncClient, registered: dict[str, str], portfolio_id: int
+    client: AsyncClient, registered: dict[str, str], portfolio_id: int, other_user: dict[str, str]
 ) -> None:
-    await client.post(
-        "/api/auth/register",
-        json={
-            "email": "other@example.com",
-            "password": "correct-horse-battery-staple",
-            "display_name": "Other",
-        },
-    )
-    login = await client.post(
-        "/api/auth/login",
-        json={"email": "other@example.com", "password": "correct-horse-battery-staple"},
-    )
-    other = {"Authorization": f"Bearer {login.json()['access_token']}"}
-
-    assert (await client.get("/api/portfolios", headers=other)).json() == []
-    assert (await client.get(f"/api/portfolios/{portfolio_id}", headers=other)).status_code == 404
+    assert (await client.get("/api/portfolios", headers=other_user)).json() == []
+    assert (
+        await client.get(f"/api/portfolios/{portfolio_id}", headers=other_user)
+    ).status_code == 404
 
 
 async def test_placing_an_order_for_an_untracked_symbol_is_a_404(
