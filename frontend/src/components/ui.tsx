@@ -133,13 +133,24 @@ export function Table({ head, children }: { head: string[]; children: ReactNode 
   )
 }
 
-export function Row({ children, onClick }: { children: ReactNode; onClick?: () => void }) {
+export function Row({
+  children,
+  onClick,
+  selected,
+}: {
+  children: ReactNode
+  onClick?: () => void
+  selected?: boolean
+}) {
   return (
     <tr
       onClick={onClick}
+      aria-selected={selected}
       className={clsx(
         'border-b border-[var(--color-border-subtle)] last:border-0',
         onClick && 'cursor-pointer hover:bg-[var(--color-surface-sunken)]',
+        selected &&
+          'bg-[var(--color-surface-raised)] font-medium shadow-[inset_3px_0_0_var(--color-accent,currentColor)]',
       )}
     >
       {children}
@@ -151,13 +162,18 @@ export function Cell({
   children,
   className,
   mono,
+  title,
 }: {
   children: ReactNode
   className?: string
   mono?: boolean
+  title?: string
 }) {
   return (
-    <td className={clsx('px-2 py-2', mono && 'font-mono text-xs tabular-nums', className)}>
+    <td
+      title={title}
+      className={clsx('px-2 py-2', mono && 'font-mono text-xs tabular-nums', className)}
+    >
       {children}
     </td>
   )

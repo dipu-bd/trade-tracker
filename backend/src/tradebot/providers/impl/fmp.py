@@ -206,6 +206,20 @@ class FmpProvider(
         params["apikey"] = self.config.credentials.get("api_key", "")
         return await self.get_json(path, params=params)
 
+    async def company_names(self, symbols: Iterable[str]) -> dict[str, str]:
+        """One request per symbol: this plan has no batch profile endpoint."""
+        found: dict[str, str] = {}
+        for symbol in symbols:
+            try:
+                rows = await self._get("/stable/profile", symbol=symbol.upper())
+            except ProviderError:
+                continue
+            if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+                name = str(rows[0].get("companyName") or "").strip()
+                if name:
+                    found[symbol.upper()] = name
+        return found
+
     async def list_universe(self, asset_class: AssetClass) -> list[UniverseEntry]:
         if asset_class is AssetClass.COMMODITY:
             return [

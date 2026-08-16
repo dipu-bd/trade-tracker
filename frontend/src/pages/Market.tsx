@@ -148,6 +148,7 @@ export function MarketExplorer() {
   const [symbol, setSymbol] = useState<string | null>(null)
   const instruments = useInstruments()
   const bars = useBars(symbol)
+  const selectedName = instruments.data?.find((row) => row.symbol === symbol)?.name ?? ''
 
   return (
     <div className="grid gap-4">
@@ -156,10 +157,17 @@ export function MarketExplorer() {
       <Card title="Instruments">
         {instruments.data?.length ? (
           <div className="max-h-[32rem] overflow-y-auto">
-            <Table head={['Symbol', 'Class', 'Last', 'Quoted']}>
+            <Table head={['Symbol', 'Name', 'Class', 'Last', 'Quoted']}>
               {instruments.data.map((row) => (
-                <Row key={row.id} onClick={() => setSymbol(row.symbol)}>
+                <Row
+                  key={row.id}
+                  onClick={() => setSymbol(row.symbol)}
+                  selected={row.symbol === symbol}
+                >
                   <Cell mono>{row.symbol}</Cell>
+                  <Cell className="max-w-[16rem] truncate" title={row.name || undefined}>
+                    {row.name || <span className="text-[var(--color-ink-muted)]">—</span>}
+                  </Cell>
                   <Cell>{row.asset_class}</Cell>
                   <Cell mono>{row.last_quote_price ? money(row.last_quote_price) : '—'}</Cell>
                   <Cell className="text-xs">{ago(row.last_quote_at)}</Cell>
@@ -172,7 +180,13 @@ export function MarketExplorer() {
         )}
       </Card>
 
-      <Card title={symbol ? `${symbol} — daily` : 'Select an instrument'}>
+      <Card
+        title={
+          symbol
+            ? `${symbol}${selectedName ? ` — ${selectedName}` : ''} — daily`
+            : 'Select an instrument'
+        }
+      >
         {bars.data?.length ? (
           <CandleChart
             data={bars.data.map((bar) => ({

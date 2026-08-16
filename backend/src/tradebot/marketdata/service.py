@@ -166,10 +166,11 @@ class MarketDataService:
         again rather than left behind: an instrument with no history is invisible to the screen
         but still shows up as tracked, which reads as a silent failure.
         """
+        wanted = [symbol.strip().upper() for symbol in symbols if symbol.strip()]
+        names = await self._company_names(wanted)
         entries = [
-            UniverseEntry(symbol=symbol.strip().upper(), asset_class=asset_class)
-            for symbol in symbols
-            if symbol.strip()
+            UniverseEntry(symbol=symbol, asset_class=asset_class, name=names.get(symbol, ""))
+            for symbol in wanted
         ]
         instruments = await self.upsert_instruments(session, entries)
         report = await self.refresh_bars(session, instruments, days=days, force=True)
@@ -186,6 +187,20 @@ class MarketDataService:
         await session.flush()
         report.instruments = len(kept)
         return kept, report
+
+    async def _company_names(self, symbols: Sequence[str]) -> dict[str, str]:
+        """Display names, best-effort. A tracked symbol with no name is still tracked."""
+        for provider in self._router.providers:
+            if not provider.available:
+                continue
+            try:
+                found: dict[str, str] = await provider.company_names(symbols)
+            except Exception as error:
+                _log.warning("company_names_failed", provider=provider.key, error=str(error))
+                continue
+            if found:
+                return found
+        return {}
 
     def _is_stale(self, instrument: Instrument) -> bool:
         if instrument.last_bar_date is None:

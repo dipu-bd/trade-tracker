@@ -60,6 +60,8 @@ class OrderOut(BaseModel):
     id: int
     client_order_id: str
     instrument_id: int
+    symbol: str = ""
+    name: str = ""
     side: str
     order_type: str
     time_in_force: str
@@ -93,6 +95,8 @@ class PositionOut(BaseModel):
 
     id: int
     instrument_id: int
+    symbol: str = ""
+    name: str = ""
     status: str
     qty: Decimal
     avg_cost: Decimal

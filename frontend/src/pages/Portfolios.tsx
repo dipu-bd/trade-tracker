@@ -179,10 +179,15 @@ export function PortfolioDetailPage({ id }: { id: number }) {
 
       <Card title="Positions">
         {positions.data?.length ? (
-          <Table head={['Instrument', 'Qty', 'Avg cost', 'Market value', 'Unrealized', 'Realized']}>
+          <Table
+            head={['Symbol', 'Name', 'Qty', 'Avg cost', 'Market value', 'Unrealized', 'Realized']}
+          >
             {positions.data.map((row) => (
               <Row key={row.id}>
-                <Cell mono>#{row.instrument_id}</Cell>
+                <Cell mono>{row.symbol || `#${row.instrument_id}`}</Cell>
+                <Cell className="max-w-[16rem] truncate" title={row.name || undefined}>
+                  {row.name || <span className="text-[var(--color-ink-muted)]">—</span>}
+                </Cell>
                 <Cell mono>{qty(row.qty)}</Cell>
                 <Cell mono>{money(row.avg_cost)}</Cell>
                 <Cell mono>{money(row.market_value)}</Cell>
@@ -352,10 +357,14 @@ export function Blotter({ id }: { id: number }) {
 
       <Card title="Orders">
         {orders.data?.length ? (
-          <Table head={['#', 'Side', 'Qty', 'Type', 'Status', 'Avg fill', 'Reason']}>
+          <Table head={['#', 'Symbol', 'Name', 'Side', 'Qty', 'Type', 'Status', 'Avg fill', 'Reason']}>
             {orders.data.map((row) => (
               <Row key={row.id}>
                 <Cell mono>{row.id}</Cell>
+                <Cell mono>{row.symbol || `#${row.instrument_id}`}</Cell>
+                <Cell className="max-w-[14rem] truncate" title={row.name || undefined}>
+                  {row.name || <span className="text-[var(--color-ink-muted)]">—</span>}
+                </Cell>
                 <Cell>
                   <Badge tone={row.side === 'BUY' ? 'ok' : 'warn'}>{row.side}</Badge>
                 </Cell>

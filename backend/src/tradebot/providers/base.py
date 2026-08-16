@@ -163,6 +163,14 @@ class Provider(ABC):
     async def aclose(self) -> None:
         return None
 
+    async def company_names(self, symbols: Iterable[str]) -> dict[str, str]:
+        """Display names by symbol. Best-effort: a provider without them returns nothing.
+
+        Deliberately not a Capability. Declaring one would make the router treat a provider as
+        a fundamentals source, which would switch on the fundamentals analyst behind it.
+        """
+        return {}
+
 
 class SupportsUniverse(Provider):
     @abstractmethod

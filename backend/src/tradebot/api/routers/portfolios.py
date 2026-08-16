@@ -131,6 +131,16 @@ async def place_order(
     return OrderOut.model_validate(order)
 
 
+async def _instrument_labels(session: DbSession, ids: set[int]) -> dict[int, tuple[str, str]]:
+    """Symbol and display name per instrument id, so a row never renders as a bare `#12`."""
+    if not ids:
+        return {}
+    rows = await session.execute(
+        select(Instrument.id, Instrument.symbol, Instrument.name).where(Instrument.id.in_(ids))
+    )
+    return {row[0]: (row[1], row[2] or "") for row in rows.all()}
+
+
 @router.get("/{portfolio_id}/orders", response_model=list[OrderOut])
 async def list_orders(
     portfolio_id: int,
@@ -145,8 +155,15 @@ async def list_orders(
     if open_only:
         stmt = stmt.where(Order.status.in_(("ACCEPTED", "PARTIALLY_FILLED")))
 
-    rows = await session.scalars(stmt.order_by(Order.id.desc()).limit(limit))
-    return [OrderOut.model_validate(row) for row in rows]
+    orders = list(await session.scalars(stmt.order_by(Order.id.desc()).limit(limit)))
+    labels = await _instrument_labels(session, {row.instrument_id for row in orders})
+
+    out: list[OrderOut] = []
+    for row in orders:
+        item = OrderOut.model_validate(row)
+        item.symbol, item.name = labels.get(row.instrument_id, ("", ""))
+        out.append(item)
+    return out
 
 
 @router.delete("/{portfolio_id}/orders/{order_id}", response_model=OrderOut)
@@ -201,9 +218,13 @@ async def list_positions(
         stmt = stmt.where(Position.status == PositionStatus.OPEN)
 
     marks = await _marks(session, portfolio_id)
+    rows = list(await session.scalars(stmt.order_by(Position.id)))
+    labels = await _instrument_labels(session, {row.instrument_id for row in rows})
+
     out: list[PositionOut] = []
-    for row in await session.scalars(stmt.order_by(Position.id)):
+    for row in rows:
         item = PositionOut.model_validate(row)
+        item.symbol, item.name = labels.get(row.instrument_id, ("", ""))
         mark = marks.get(row.instrument_id)
         if mark is not None:
             item.market_value = lot_math.market_value(row, mark)

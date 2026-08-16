@@ -1786,6 +1786,16 @@ export interface components {
             client_order_id: string;
             /** Instrument Id */
             instrument_id: number;
+            /**
+             * Symbol
+             * @default
+             */
+            symbol: string;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
             /** Side */
             side: string;
             /** Order Type */
@@ -1904,6 +1914,16 @@ export interface components {
             id: number;
             /** Instrument Id */
             instrument_id: number;
+            /**
+             * Symbol
+             * @default
+             */
+            symbol: string;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
             /** Status */
             status: string;
             /** Qty */
