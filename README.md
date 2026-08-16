@@ -82,24 +82,26 @@ them undecryptable.
 
 ## Deployment
 
-`main` builds an image, publishes it to `ghcr.io/<owner>/<repo>`, and rolls it out over SSH; see
-`.github/workflows/deploy.yml`. The server runs `docker-compose.prod.yml`, which **pulls** the
-published tag rather than building — nothing is compiled on the host, so what runs is what CI
-tested. Rolling back is dispatching the workflow with an earlier `tag`.
+CI only builds. `.github/workflows/build-docker.yml` publishes a multi-arch (amd64 + arm64)
+image to `ghcr.io/<owner>/<repo>`, tagged `latest` and with the commit sha. It does not touch any
+server.
 
-Repository secrets it needs:
+Rolling it out is a manual step over SSH, using `scripts/server-compose.yml`:
 
-| Secret | What it is |
-|---|---|
-| `SSH_SECRET` | Private key authorised on the server |
-| `DEPLOY_HOST` | Hostname or IP |
-| `DEPLOY_USER` | SSH user, must be in the `docker` group |
-| `DEPLOY_PATH` | Directory holding the compose file and `.env` |
-| `ENV_FILE` | Full contents of the server's `.env` |
+```bash
+scp scripts/server-compose.yml you@server:/srv/tradebot/docker-compose.yml
+ssh you@server
+cd /srv/tradebot
+docker compose pull && docker compose up -d
+```
 
-`ENV_FILE` must define `TRADEBOT_SECRET_KEY` and `POSTGRES_PASSWORD`; both are required and the
-stack refuses to start without them. Provider keys belong here too if you want the container to
-seed them, though entering them in Settings is the normal path.
+The compose file **pulls** the published tag and never builds, so the host needs no toolchain and
+what runs is what CI produced. Pin `TRADEBOT_TAG` to a commit sha to roll back.
+
+`.env` beside the compose file must define `TRADEBOT_SECRET_KEY` and `POSTGRES_PASSWORD` — both
+are required and the stack refuses to start without them. Provider keys can go there too if you
+want the container to seed them on start, though entering them in Settings is the normal path.
+Postgres data is a bind mount at `./pgdata`, so back that up rather than a named volume.
 
 ## Layout
 

@@ -1,0 +1,62 @@
+services:
+  autoheal:
+    image: willfarrell/autoheal:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+      AUTOHEAL_INTERVAL: 30
+      AUTOHEAL_START_PERIOD: 90
+    deploy:
+      resources:
+        limits:
+          memory: "64M"
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    shm_size: 128mb
+    environment:
+      POSTGRES_DB: tradebot
+      POSTGRES_USER: tradebot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tradebot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: "1G"
+
+  api:
+    # Pulled, never built here. `docker compose pull && docker compose up -d` is the deploy.
+    image: ghcr.io/dipu-bd/trade-tracker:${TRADEBOT_TAG:-latest}
+    init: true
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${TRADEBOT_PORT:-43595}:8000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      TRADEBOT_ENV: prod
+      TRADEBOT_DATABASE_URL: postgresql+asyncpg://tradebot:${POSTGRES_PASSWORD:?}@postgres:5432/tradebot
+      TRADEBOT_SECRET_KEY: ${TRADEBOT_SECRET_KEY:?set TRADEBOT_SECRET_KEY in .env}
+      TRADEBOT_COOKIE_SECURE: ${TRADEBOT_COOKIE_SECURE:-true}
+      TZ: ${TZ:-UTC}
+    labels:
+      - autoheal=true
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: "2G"
