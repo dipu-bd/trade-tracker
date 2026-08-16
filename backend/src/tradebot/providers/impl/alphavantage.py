@@ -104,6 +104,13 @@ def _parse_quote(symbol: str, payload: Any) -> Quote | None:
     )
 
 
+def _float(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _parse_news(row: Any, wanted: list[str]) -> NewsItem | None:
     if not isinstance(row, dict):
         return None
@@ -112,12 +119,20 @@ def _parse_news(row: Any, wanted: list[str]) -> NewsItem | None:
     if not headline or published is None:
         return None
 
-    tickers = [
-        str(entry.get("ticker", "")).upper()
+    # Highest relevance among the requested tickers, not the first match: this feed routinely
+    # tags several mega-caps in one index-fund article, and the first-listed one is arbitrary.
+    scored = [
+        (str(entry.get("ticker", "")).upper(), _float(entry.get("relevance_score")))
         for entry in row.get("ticker_sentiment", [])
         if isinstance(entry, dict)
     ]
-    symbol = next((t for t in tickers if t in wanted), wanted[0])
+    matches = [(ticker, score) for ticker, score in scored if ticker in wanted]
+    symbol = max(matches, key=lambda pair: pair[1])[0] if matches else None
+    if symbol is None:
+        # Dropped rather than attributed to the first requested ticker: a headline about an
+        # unrelated company, labelled as this instrument's news, manufactures sentiment the
+        # model would then reason from.
+        return None
 
     return NewsItem(
         symbol=symbol,
