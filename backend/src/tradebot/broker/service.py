@@ -192,8 +192,14 @@ class BrokerService:
             return None
         if time_in_force == TimeInForce.IOC:
             return now
+        # A DAY order entered at or after the close belongs to the next session, as at a real
+        # broker. Expiring it at today's close makes every order from a close-time cycle dead
+        # on arrival, which is what stopped the first real-data replay filling anything.
         bounds = calendar.session_bounds(now.date())
-        return bounds[1] if bounds else now + timedelta(days=1)
+        if bounds is not None and now < bounds[1]:
+            return bounds[1]
+        following = calendar.session_bounds(calendar.next_trading_day(now.date()))
+        return following[1] if following else now + timedelta(days=1)
 
     async def _reject_reason(
         self,
@@ -291,7 +297,15 @@ class BrokerService:
                 matching.fillable_qty(order, quote),
                 whole_units=not portfolio.allow_fractional,
             )
+            if order.side == Side.BUY:
+                qty = await self._affordable_qty(
+                    session, portfolio, instrument, qty, trigger.reference
+                )
             if qty <= ZERO:
+                if order.side == Side.BUY:
+                    order_rules.transition(order, OrderStatus.EXPIRED, at=now)
+                    order.reserved_cash = ZERO
+                    report.expired.append(order.id)
                 continue
 
             report.fills.append(
@@ -357,6 +371,34 @@ class BrokerService:
             payload={"qty": str(qty), "price": str(price), "fee": str(fee)},
         )
         return FillResult(order.id, qty, price, fee, realized)
+
+    async def _affordable_qty(
+        self,
+        session: AsyncSession,
+        portfolio: Portfolio,
+        instrument: Instrument,
+        qty: Decimal,
+        reference: Decimal,
+    ) -> Decimal:
+        """Shrink a BUY to what cash covers at the price it is about to fill at.
+
+        The reservation was taken against the deciding close; a market that gaps up overnight
+        fills above it. Without this the ledger's overdraw guard raises out of the whole cycle,
+        which is how one gap-up ended the first real-data replay. Priced through the same
+        participation-adjusted model `_execute` will use, or the impact term reopens the gap.
+        """
+        participation = await self._participation(session, instrument, qty, reference)
+        costs = CostModel.of(portfolio).at_participation(participation)
+        price = costs.fill_price(reference, Side.BUY)
+        cash = await self._ledger.balance(session, portfolio.id)
+        if price <= ZERO or costs.buy_cost(qty, price) <= cash:
+            return qty
+
+        whole = not portfolio.allow_fractional
+        affordable = quantize_qty(cash / price, whole_units=whole)
+        while affordable > ZERO and costs.buy_cost(affordable, price) > cash:
+            affordable = quantize_qty(affordable * Decimal("0.999"), whole_units=whole)
+        return max(ZERO, affordable)
 
     async def _participation(
         self, session: AsyncSession, instrument: Instrument, qty: Decimal, reference: Decimal

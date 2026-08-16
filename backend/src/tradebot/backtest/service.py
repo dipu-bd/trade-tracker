@@ -4,7 +4,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tradebot.backtest.ic import measure_from_decisions
-from tradebot.backtest.report import BacktestReport, leakage_split, summarise
+from tradebot.backtest.report import (
+    BacktestReport,
+    leakage_split,
+    overfitting_probability,
+    summarise,
+)
 from tradebot.backtest.runner import (
     ReplayRunner,
     buy_and_hold,
@@ -113,14 +118,18 @@ class BacktestService:
         trials = self._trials.trials
         report.trials = trials
 
+        results = []
         for name, pipeline in arms.items():
             sandbox = await self._sandbox(session, portfolio, days[0])
             sandbox.ai_enabled = pipeline is not None
             result = await ReplayRunner(self._events).run(
                 session, sandbox, days, label=name, ai_pipeline=pipeline
             )
+            results.append(result)
             report.strategies.append(summarise(result, trials))
             await self._cleanup(session, sandbox)
+
+        report.pbo = overfitting_probability(results)
 
         report.benchmark = summarise(
             await buy_and_hold(
@@ -166,6 +175,7 @@ class BacktestService:
         report.trials = trials
 
         outcomes: dict[str, float] = {}
+        results = []
         for name, overrides in arms.items():
             sandbox = await self._sandbox(session, portfolio, days[0])
             sandbox.strategy = {**(portfolio.strategy or {}), **_merge(overrides)}
@@ -173,9 +183,12 @@ class BacktestService:
 
             result = await ReplayRunner(self._events).run(session, sandbox, days, label=name)
             summary = summarise(result, trials)
+            results.append(result)
             report.strategies.append(summary)
             outcomes[name] = summary.performance.total_return
             await self._cleanup(session, sandbox)
+
+        report.pbo = overfitting_probability(results)
 
         report.benchmark = summarise(
             await buy_and_hold(
@@ -287,7 +300,15 @@ def _scaling_verdict(outcomes: dict[str, float]) -> str:
     parts = [
         f"Signal alone {signal:+.2%}, scaling alone {scaling:+.2%}, both {both:+.2%}.",
     ]
-    if best == "scaling_only":
+    if abs(signal - both) < 1e-9:
+        # Real data hit this: with the position cap binding first, turning vol scaling off
+        # changed no weight, so naming a winner between identical arms would be an artifact.
+        parts.append(
+            "Signal-only and both are IDENTICAL, so this window cannot attribute anything to "
+            "the volatility scaling: another constraint is binding before the scaling can move "
+            "a weight. Treat the scaling as untested here rather than as unhelpful."
+        )
+    elif best == "scaling_only":
         parts.append(
             "The VOLATILITY SCALING is doing the work: it beat the momentum signal alone and the "
             "full strategy. The momentum signal is not earning its place on this window."

@@ -374,6 +374,86 @@ async def test_an_ioc_order_expires_when_it_cannot_fill(
     assert order.status == OrderStatus.EXPIRED
 
 
+async def test_a_gap_up_shrinks_the_buy_instead_of_overdrawing_the_account(
+    context: AppContext, broker: BrokerService
+) -> None:
+    """Real data found this too: a fill above the reserved price crashed the whole cycle."""
+    ids = await setup(context)
+
+    async with context.db.session() as session:
+        portfolio = await session.get(Portfolio, ids[0])
+        instrument = await session.get(Instrument, ids[1])
+        order = await broker.place_order(
+            session,
+            portfolio=portfolio,
+            instrument=instrument,
+            side=Side.BUY,
+            qty=Decimal(999),
+            reference_price=Decimal(100),
+        )
+        await broker.on_quote(session, portfolio, instrument, quote("120"))
+        cash = await broker.cash(session, portfolio.id)
+
+    assert cash >= Decimal(0)
+    assert order.filled_qty < Decimal(999)
+    assert order.filled_qty > Decimal(0)
+
+
+async def test_a_day_order_placed_after_the_close_survives_into_the_next_session(
+    context: AppContext,
+) -> None:
+    """Real data found this: every order a close-time cycle placed was born already expired.
+
+    2026-08-12 is a Wednesday, so 21:00 UTC is an hour past the 20:00 UTC close and the next
+    session is the following calendar day.
+    """
+    after_close = datetime(2026, 8, 12, 21, 0, tzinfo=UTC)
+    clock = FrozenClock(after_close)
+    service = BrokerService(Ledger(clock=clock), context.events, clock=clock)
+    ids = await setup(context)
+
+    async with context.db.session() as session:
+        portfolio = await session.get(Portfolio, ids[0])
+        instrument = await session.get(Instrument, ids[1])
+        order = await service.place_order(
+            session,
+            portfolio=portfolio,
+            instrument=instrument,
+            side=Side.BUY,
+            qty=Decimal(10),
+            reference_price=Decimal(100),
+        )
+
+    assert order.status == OrderStatus.ACCEPTED
+    assert order.expires_at is not None
+    assert order.expires_at > after_close
+    assert order.expires_at.date() > after_close.date()
+
+
+async def test_a_day_order_placed_during_the_session_still_expires_at_that_close(
+    context: AppContext,
+) -> None:
+    during = datetime(2026, 8, 12, 15, 0, tzinfo=UTC)
+    clock = FrozenClock(during)
+    service = BrokerService(Ledger(clock=clock), context.events, clock=clock)
+    ids = await setup(context)
+
+    async with context.db.session() as session:
+        portfolio = await session.get(Portfolio, ids[0])
+        instrument = await session.get(Instrument, ids[1])
+        order = await service.place_order(
+            session,
+            portfolio=portfolio,
+            instrument=instrument,
+            side=Side.BUY,
+            qty=Decimal(10),
+            reference_price=Decimal(100),
+        )
+
+    assert order.expires_at is not None
+    assert order.expires_at.date() == during.date()
+
+
 async def test_equity_equals_cash_plus_marked_positions(
     context: AppContext, broker: BrokerService
 ) -> None:

@@ -54,6 +54,15 @@ def previous_trading_day(day: date, asset_class: AssetClass = AssetClass.STOCK) 
     return cursor
 
 
+def next_trading_day(day: date, asset_class: AssetClass = AssetClass.STOCK) -> date:
+    if is_24x7(asset_class):
+        return day + timedelta(days=1)
+    cursor = day + timedelta(days=1)
+    while not is_trading_day(cursor):
+        cursor += timedelta(days=1)
+    return cursor
+
+
 def trading_days_between(
     start: date, end: date, asset_class: AssetClass = AssetClass.STOCK
 ) -> list[date]:

@@ -5,7 +5,11 @@ from typing import Any
 from tradebot.backtest.ic import SignalQuality
 from tradebot.backtest.metrics import Performance, simple_returns
 from tradebot.backtest.runner import ReplayResult
-from tradebot.backtest.statistics import DeflatedSharpe, deflated_sharpe
+from tradebot.backtest.statistics import (
+    DeflatedSharpe,
+    deflated_sharpe,
+    probability_of_backtest_overfitting,
+)
 
 
 @dataclass
@@ -42,6 +46,7 @@ class BacktestReport:
     control: StrategyReport | None = None
     signals: list[SignalQuality] = field(default_factory=list)
     leakage: dict[str, Any] = field(default_factory=dict)
+    pbo: float | None = None
     notes: list[str] = field(default_factory=list)
 
     @property
@@ -120,8 +125,27 @@ class BacktestReport:
             "control": self.control.as_dict() if self.control else None,
             "signals": [item.as_dict() for item in self.signals],
             "leakage": self.leakage,
+            "pbo": round(self.pbo, 4) if self.pbo is not None else None,
             "notes": self.notes,
         }
+
+
+def overfitting_probability(results: list[ReplayResult]) -> float | None:
+    """PBO across the arms of one ablation.
+
+    Needs at least two arms to mean anything: PBO asks how often the arm that looked best
+    in-sample lands below median out-of-sample, and with one arm there is no selection to judge.
+    """
+    curves = [simple_returns(result.equity) for result in results if len(result.equity) > 1]
+    if len(curves) < 2:
+        return None
+
+    shortest = min(len(curve) for curve in curves)
+    if shortest < 4:
+        return None
+
+    rows = [[curve[period] for curve in curves] for period in range(shortest)]
+    return probability_of_backtest_overfitting(rows)
 
 
 def summarise(result: ReplayResult, trials: int, periods_per_year: int = 252) -> StrategyReport:

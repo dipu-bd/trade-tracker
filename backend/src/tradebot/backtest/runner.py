@@ -3,14 +3,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tradebot.backtest.metrics import Performance, TradeResult, evaluate
 from tradebot.broker.ledger import Ledger
 from tradebot.broker.service import BrokerService
 from tradebot.core.clock import ReplayClock
-from tradebot.db.models import Instrument, Portfolio, Position, PositionStatus, PriceBar
+from tradebot.db.models import Instrument, Lot, Portfolio, Position, PositionStatus, PriceBar
 from tradebot.engine.cycle import DecisionCycle
 from tradebot.obs import EventRecorder
 from tradebot.providers.base import Quote
@@ -220,7 +220,15 @@ class ReplayRunner:
 
         trades: list[TradeResult] = []
         for position, symbol in rows.all():
-            cost = float(position.avg_cost)
+            # avg_cost is zero on a closed position, so the capital at risk has to come from the
+            # lots. Reading it off the position dropped every closed trade and left win rate,
+            # profit factor, expectancy and average R reporting zero on any real run.
+            deployed = await session.scalar(
+                select(func.sum(Lot.qty_original * Lot.cost_basis)).where(
+                    Lot.position_id == position.id
+                )
+            )
+            cost = float(deployed or 0)
             if cost <= 0:
                 continue
             days = 1
