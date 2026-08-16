@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from tradebot.api.routers import (
+    ai,
     auth,
     credentials,
     engine,
@@ -17,6 +18,7 @@ api_router.include_router(credentials.router)
 api_router.include_router(market.router)
 api_router.include_router(portfolios.router)
 api_router.include_router(engine.router)
+api_router.include_router(ai.router)
 api_router.include_router(engine.schedule_router)
 api_router.include_router(observability.router)
 

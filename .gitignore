@@ -22,3 +22,6 @@ dist/
 .DS_Store
 .idea/
 *.tsbuildinfo
+
+# Regenerated from the running app; schema.d.ts is the committed artifact.
+backend/openapi.json

@@ -1,0 +1,189 @@
+import { clsx } from 'clsx'
+import type { ReactNode } from 'react'
+
+export function Card({
+  title,
+  action,
+  children,
+  className,
+}: {
+  title?: ReactNode
+  action?: ReactNode
+  children: ReactNode
+  className?: string
+}) {
+  return (
+    <section
+      className={clsx(
+        'rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)]',
+        className,
+      )}
+    >
+      {(title || action) && (
+        <header className="flex items-center justify-between gap-3 border-b border-[var(--color-border-subtle)] px-4 py-3">
+          <h2 className="text-sm font-medium">{title}</h2>
+          {action}
+        </header>
+      )}
+      <div className="p-4">{children}</div>
+    </section>
+  )
+}
+
+export function Stat({
+  label,
+  value,
+  hint,
+  className,
+}: {
+  label: string
+  value: ReactNode
+  hint?: ReactNode
+  className?: string
+}) {
+  return (
+    <div>
+      <div className="text-xs uppercase tracking-wide text-[var(--color-ink-muted)]">{label}</div>
+      <div className={clsx('mt-1 text-lg tabular-nums', className)}>{value}</div>
+      {hint && <div className="text-xs text-[var(--color-ink-muted)]">{hint}</div>}
+    </div>
+  )
+}
+
+const BADGE_TONES: Record<string, string> = {
+  ok: 'bg-[color-mix(in_oklab,var(--color-gain)_18%,transparent)] text-[var(--color-gain)]',
+  bad: 'bg-[color-mix(in_oklab,var(--color-loss)_18%,transparent)] text-[var(--color-loss)]',
+  warn: 'bg-[color-mix(in_oklab,#d97706_20%,transparent)] text-[#f59e0b]',
+  muted: 'bg-[var(--color-surface-sunken)] text-[var(--color-ink-muted)]',
+}
+
+export function Badge({
+  children,
+  tone = 'muted',
+  title,
+}: {
+  children: ReactNode
+  tone?: keyof typeof BADGE_TONES
+  title?: string
+}) {
+  return (
+    <span
+      title={title}
+      className={clsx(
+        'inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium',
+        BADGE_TONES[tone],
+      )}
+    >
+      {children}
+    </span>
+  )
+}
+
+export function Button({
+  children,
+  onClick,
+  variant = 'default',
+  disabled,
+  type = 'button',
+}: {
+  children: ReactNode
+  onClick?: () => void
+  variant?: 'default' | 'primary' | 'ghost'
+  disabled?: boolean
+  type?: 'button' | 'submit'
+}) {
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
+      className={clsx(
+        'rounded px-3 py-1.5 text-sm font-medium transition disabled:opacity-40',
+        variant === 'primary' &&
+          'bg-[var(--color-accent)] text-[var(--color-surface-base)] hover:opacity-90',
+        variant === 'default' &&
+          'border border-[var(--color-border-subtle)] hover:bg-[var(--color-surface-sunken)]',
+        variant === 'ghost' && 'text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]',
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+export function Table({ head, children }: { head: string[]; children: ReactNode }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-[var(--color-border-subtle)] text-left">
+            {head.map((column) => (
+              <th
+                key={column}
+                className="px-2 py-2 text-xs font-medium uppercase tracking-wide text-[var(--color-ink-muted)]"
+              >
+                {column}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>{children}</tbody>
+      </table>
+    </div>
+  )
+}
+
+export function Row({ children, onClick }: { children: ReactNode; onClick?: () => void }) {
+  return (
+    <tr
+      onClick={onClick}
+      className={clsx(
+        'border-b border-[var(--color-border-subtle)] last:border-0',
+        onClick && 'cursor-pointer hover:bg-[var(--color-surface-sunken)]',
+      )}
+    >
+      {children}
+    </tr>
+  )
+}
+
+export function Cell({
+  children,
+  className,
+  mono,
+}: {
+  children: ReactNode
+  className?: string
+  mono?: boolean
+}) {
+  return (
+    <td className={clsx('px-2 py-2', mono && 'font-mono text-xs tabular-nums', className)}>
+      {children}
+    </td>
+  )
+}
+
+export function Empty({ children }: { children: ReactNode }) {
+  return <p className="py-6 text-center text-sm text-[var(--color-ink-muted)]">{children}</p>
+}
+
+export function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string
+  hint?: string
+  children: ReactNode
+}) {
+  return (
+    <label className="block">
+      <span className="text-xs uppercase tracking-wide text-[var(--color-ink-muted)]">{label}</span>
+      <div className="mt-1">{children}</div>
+      {hint && <span className="mt-1 block text-xs text-[var(--color-ink-muted)]">{hint}</span>}
+    </label>
+  )
+}
+
+export const inputClass =
+  'w-full rounded border border-[var(--color-border-subtle)] bg-[var(--color-surface-base)] px-2 py-1.5 text-sm outline-none focus:border-[var(--color-accent)]'

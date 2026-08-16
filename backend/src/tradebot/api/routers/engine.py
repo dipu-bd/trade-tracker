@@ -9,6 +9,7 @@ from tradebot.broker.service import load_portfolio
 from tradebot.core.errors import ConflictError, NotFoundError
 from tradebot.db.models import DecisionRun
 from tradebot.engine.config import SECTIONS, parameter_count, strategy_config
+from tradebot.engine.presets import BY_KEY, PRESETS
 from tradebot.engine.runner import EngineRunner
 from tradebot.schemas.engine import (
     CycleTriggered,
@@ -132,7 +133,34 @@ async def get_cycle(
     return DecisionRunDetail.model_validate(run)
 
 
+@router.post("/{portfolio_id}/strategy/preset/{preset_key}", response_model=StrategySummary)
+async def apply_preset(
+    portfolio_id: int, preset_key: str, user: CurrentUser, session: DbSession
+) -> StrategySummary:
+    """Apply a preset wholesale. A starting point for the wizard, not a recommendation."""
+    portfolio = await load_portfolio(session, portfolio_id, user.id)
+    preset = BY_KEY.get(preset_key)
+    if preset is None:
+        raise NotFoundError(f"unknown preset: {preset_key}")
+
+    portfolio.benchmark = preset.benchmark
+    portfolio.cadence = preset.cadence
+    portfolio.strategy = preset.strategy
+    portfolio.universe = preset.universe
+    portfolio.quality = preset.quality
+    portfolio.deliberation = preset.deliberation
+    await session.flush()
+
+    return await get_strategy(portfolio_id, user, session)
+
+
 schedule_router = APIRouter(prefix="/engine", tags=["engine"])
+
+
+@schedule_router.get("/presets", response_model=list[dict[str, Any]])
+async def list_presets(_user: CurrentUser) -> list[dict[str, Any]]:
+    """The shipped strategy templates the configuration wizard offers."""
+    return [preset.as_dict() for preset in PRESETS]
 
 
 @schedule_router.get("/schedule", response_model=list[ScheduledJob])

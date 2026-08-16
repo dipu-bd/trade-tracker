@@ -3,6 +3,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import { App } from '@/App'
+import { AuthProvider } from '@/auth'
 import '@/index.css'
 
 const queryClient = new QueryClient({
@@ -17,7 +18,9 @@ if (!root) throw new Error('missing #root')
 createRoot(root).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <App />
+      <AuthProvider>
+        <App />
+      </AuthProvider>
     </QueryClientProvider>
   </StrictMode>,
 )

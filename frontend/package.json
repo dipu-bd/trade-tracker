@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "generate:api": "openapi-typescript ../backend/openapi.json -o src/api/schema.d.ts"
+    "generate:schema": "cd ../backend && uv run python -m tradebot.openapi",
+    "generate:api": "pnpm run generate:schema && openapi-typescript ../backend/openapi.json -o src/api/schema.d.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.62.0",
