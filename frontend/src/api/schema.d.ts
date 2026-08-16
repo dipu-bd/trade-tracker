@@ -690,6 +690,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/portfolios/{portfolio_id}/backtest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Backtest
+         * @description Replay the strategy and answer whether it beat holding an index fund.
+         *
+         *     The verdict is derived from the numbers, so a result that loses to the benchmark or fails
+         *     deflation says so as the headline rather than as a footnote.
+         */
+        post: operations["run_backtest_api_portfolios__portfolio_id__backtest_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/engine/presets": {
         parameters: {
             query?: never;
@@ -2884,6 +2907,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChatReply"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_backtest_api_portfolios__portfolio_id__backtest_post: {
+        parameters: {
+            query?: {
+                start?: string | null;
+                end?: string | null;
+                control?: boolean;
+            };
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */
