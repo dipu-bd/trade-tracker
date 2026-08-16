@@ -6,6 +6,7 @@ from apscheduler.triggers.cron import CronTrigger
 from tradebot.context import AppContext
 from tradebot.core.logging import get_logger
 from tradebot.engine.runner import EngineRunner
+from tradebot.marketdata.refresh import MarketDataRefresher
 
 _log = get_logger(__name__)
 
@@ -26,6 +27,8 @@ CADENCES = (
 
 BY_NAME = {cadence.name: cadence for cadence in CADENCES}
 
+BAR_REFRESH_CRON = "30 20 * * mon-fri"
+
 
 class EngineScheduler:
     """UTC cron only.
@@ -37,6 +40,7 @@ class EngineScheduler:
     def __init__(self, context: AppContext) -> None:
         self._context = context
         self._runner = EngineRunner(context)
+        self._refresher = MarketDataRefresher(context)
         self._scheduler = AsyncIOScheduler(timezone="UTC")
 
     @property
@@ -54,6 +58,17 @@ class EngineScheduler:
                 max_instances=1,
                 coalesce=True,
             )
+
+        # Ahead of the earliest cycle, so a decision reads bars from the session that just closed
+        # rather than the one before it.
+        self._scheduler.add_job(
+            self._refresher.refresh_all,
+            CronTrigger.from_crontab(BAR_REFRESH_CRON, timezone="UTC"),
+            id="market:bars",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
         self._scheduler.start()
         _log.info("scheduler_started", cadences=[item.name for item in CADENCES])
 
@@ -65,8 +80,14 @@ class EngineScheduler:
         return [
             {
                 "id": job.id,
-                "cron": BY_NAME[job.id.split(":", 1)[1]].cron,
+                "cron": self._cron_for(job.id),
                 "next_run": job.next_run_time.isoformat() if job.next_run_time else None,
             }
             for job in self._scheduler.get_jobs()
         ]
+
+    def _cron_for(self, job_id: str) -> str | None:
+        kind, _, name = job_id.partition(":")
+        if kind == "cycle" and name in BY_NAME:
+            return BY_NAME[name].cron
+        return BAR_REFRESH_CRON if job_id == "market:bars" else None

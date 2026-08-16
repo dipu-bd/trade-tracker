@@ -196,3 +196,32 @@ async def test_the_schedule_is_empty_when_the_scheduler_is_disabled(
     response = await client.get("/api/engine/schedule", headers=registered)
 
     assert response.json() == []
+
+
+async def test_the_scheduler_lists_the_bar_refresh_alongside_the_cycles(
+    context: AppContext,
+) -> None:
+    """A job id the cron lookup did not know about used to raise rather than list."""
+    from tradebot.workers.scheduler import EngineScheduler
+
+    scheduler = EngineScheduler(context)
+    scheduler.start()
+    try:
+        jobs = {job["id"]: job for job in scheduler.jobs()}
+    finally:
+        scheduler.shutdown()
+
+    assert "market:bars" in jobs
+    assert jobs["market:bars"]["cron"]
+    assert all(job["cron"] for job in jobs.values())
+
+
+async def test_the_bar_refresh_adds_no_instruments_when_none_are_tracked(
+    context: AppContext,
+) -> None:
+    from tradebot.marketdata.refresh import MarketDataRefresher
+
+    report = await MarketDataRefresher(context).refresh_all()
+
+    assert report.instruments == 0
+    assert report.bars_written == 0
