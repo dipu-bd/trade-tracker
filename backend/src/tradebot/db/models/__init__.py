@@ -1,9 +1,11 @@
 from tradebot.db.base import Base
 from tradebot.db.models.broker import (
+    AICall,
     DecisionRun,
     EntryType,
     Fill,
     LedgerEntry,
+    Lesson,
     Lot,
     Order,
     OrderStatus,
@@ -26,6 +28,7 @@ from tradebot.db.models.market import (
 from tradebot.db.models.user import Session, User
 
 __all__ = [
+    "AICall",
     "Base",
     "CorporateActionRecord",
     "Credential",
@@ -35,6 +38,7 @@ __all__ = [
     "Fill",
     "Instrument",
     "LedgerEntry",
+    "Lesson",
     "Lot",
     "Order",
     "OrderStatus",

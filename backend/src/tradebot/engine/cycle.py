@@ -6,14 +6,20 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tradebot.ai.pipeline import AIOutcome, AIPipeline
+from tradebot.ai.reflection import ClosedTrade, Reflection
 from tradebot.analytics.exits import ExitAction, Holding
 from tradebot.analytics.features import Features, extract
+from tradebot.analytics.indicators import rolling_return
+from tradebot.analytics.series import BarSeries
 from tradebot.broker.service import BrokerService
 from tradebot.core.clock import Clock
 from tradebot.db.models import (
     DecisionRun,
     Fill,
     Instrument,
+    Lesson,
+    Lot,
     Order,
     OrderStatus,
     OrderType,
@@ -27,6 +33,7 @@ from tradebot.engine.strategy import Decision, Entry, PortfolioState, decide
 from tradebot.engine.universe import UniverseSpec, resolve
 from tradebot.marketdata.view import MarketView
 from tradebot.obs import EventRecorder
+from tradebot.providers.base import Capability
 
 TURNOVER_WINDOW_DAYS = 30
 
@@ -39,6 +46,7 @@ class CycleReport:
     decision: Decision | None = None
     orders: list[int] = field(default_factory=list)
     skipped_orders: dict[str, str] = field(default_factory=dict)
+    ai: AIOutcome | None = None
     error: str | None = None
 
     @property
@@ -53,10 +61,23 @@ class DecisionCycle:
     can be a different wiring of this code instead of a parallel implementation of it.
     """
 
-    def __init__(self, broker: BrokerService, events: EventRecorder, clock: Clock) -> None:
+    def __init__(
+        self,
+        broker: BrokerService,
+        events: EventRecorder,
+        clock: Clock,
+        ai: AIPipeline | None = None,
+        reflection: Reflection | None = None,
+        keys: dict[str, str] | None = None,
+        capabilities: frozenset[Capability] = frozenset(),
+    ) -> None:
         self._broker = broker
         self._events = events
         self._clock = clock
+        self._ai = ai
+        self._reflection = reflection
+        self._keys = keys or {}
+        self._capabilities = capabilities
 
     async def run(
         self, session: AsyncSession, portfolio: Portfolio, trigger: str = "scheduled"
@@ -80,8 +101,11 @@ class DecisionCycle:
         await self._emit(session, portfolio, "cycle_started", correlation_id, {"trigger": trigger})
 
         try:
-            decision = await self._decide(session, portfolio, view, as_of)
+            decision, ai = await self._decide(
+                session, portfolio, view, as_of, correlation_id, run.id
+            )
             report.decision = decision
+            report.ai = ai
             await self._emit(
                 session,
                 portfolio,
@@ -132,6 +156,7 @@ class DecisionCycle:
             "screened_out": decision.screened_out,
             "skipped": decision.skipped,
             "skipped_orders": report.skipped_orders,
+            "ai": report.ai.as_detail() if report.ai else {"enabled": False},
         }
         await session.flush()
 
@@ -145,8 +170,14 @@ class DecisionCycle:
         return report
 
     async def _decide(
-        self, session: AsyncSession, portfolio: Portfolio, view: MarketView, as_of: date
-    ) -> Decision:
+        self,
+        session: AsyncSession,
+        portfolio: Portfolio,
+        view: MarketView,
+        as_of: date,
+        correlation_id: str = "",
+        run_id: int | None = None,
+    ) -> tuple[Decision, AIOutcome]:
         config = strategy_config(portfolio)
         state, held_symbols = await self._state(session, portfolio, view)
 
@@ -160,7 +191,9 @@ class DecisionCycle:
         benchmark_series = await view.bars(config.benchmark, 700)
         benchmark_features = extract(benchmark_series)
 
-        return decide(
+        await self._reflect(session, portfolio, benchmark_series)
+
+        proposed = decide(
             as_of=as_of,
             cohort=cohort,
             benchmark_series=benchmark_series,
@@ -169,6 +202,86 @@ class DecisionCycle:
             config=config,
             names=universe.names,
         )
+
+        if self._ai is None:
+            return proposed, AIOutcome(reason="no ai pipeline wired")
+
+        outcome = await self._ai.run(
+            session,
+            portfolio,
+            as_of,
+            proposed,
+            state,
+            {item.symbol: item for item in cohort},
+            config,
+            self._keys,
+            self._capabilities,
+            correlation_id,
+            run_id,
+        )
+        if not outcome.used:
+            return proposed, outcome
+
+        # Re-run the rules with the meta-labeler's confidence. Deterministic and cheap, and it
+        # keeps the AI's whole influence expressible as one map the audit row can show.
+        final = decide(
+            as_of=as_of,
+            cohort=cohort,
+            benchmark_series=benchmark_series,
+            benchmark_features=benchmark_features,
+            state=state,
+            config=config,
+            names=universe.names,
+            confidence=outcome.confidence,
+        )
+        return final, outcome
+
+    async def _reflect(
+        self, session: AsyncSession, portfolio: Portfolio, benchmark: BarSeries
+    ) -> None:
+        """Turn positions that closed since the last cycle into lessons.
+
+        Triggered at the start of a cycle rather than on the fill, because a position closes
+        when a quote arrives rather than when the engine is running, and reflecting here is
+        idempotent — a position already carrying a lesson is skipped.
+        """
+        if self._reflection is None:
+            return
+
+        closed = await session.execute(
+            select(Position, Instrument.symbol)
+            .join(Instrument, Position.instrument_id == Instrument.id)
+            .outerjoin(Lesson, Lesson.position_id == Position.id)
+            .where(
+                Position.portfolio_id == portfolio.id,
+                Position.status == PositionStatus.CLOSED,
+                Position.closed_at.is_not(None),
+                Lesson.id.is_(None),
+            )
+            .limit(5)
+        )
+
+        for position, symbol in closed.all():
+            days = max(1, (position.closed_at - position.opened_at).days)
+            invested = await session.scalar(
+                select(func.coalesce(func.sum(Lot.qty_original * Lot.cost_basis), 0)).where(
+                    Lot.position_id == position.id
+                )
+            )
+            cost = float(invested or 0)
+            realized = float(position.realized_pnl) / cost if cost > 0 else 0.0
+            await self._reflection.record(
+                session,
+                ClosedTrade(
+                    portfolio_id=portfolio.id,
+                    position_id=position.id,
+                    symbol=symbol,
+                    closed_at=position.closed_at,
+                    holding_days=days,
+                    realized_return=realized,
+                    benchmark_return=_benchmark_return(benchmark, days),
+                ),
+            )
 
     async def _state(
         self, session: AsyncSession, portfolio: Portfolio, view: MarketView
@@ -424,3 +537,15 @@ class DecisionCycle:
             correlation_id=correlation_id,
             payload=payload,
         )
+
+
+def _benchmark_return(benchmark: BarSeries, days: int) -> float:
+    """What the benchmark did over the same holding window.
+
+    A winning trade that lagged the benchmark is not a good trade, and the lesson is worthless
+    without that comparison.
+    """
+    closes = benchmark.closes
+    if len(closes) < days + 1:
+        return 0.0
+    return rolling_return(closes, days) or 0.0

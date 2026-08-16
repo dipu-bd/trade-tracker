@@ -33,6 +33,19 @@ class ProviderService:
             stored.setdefault(record.provider_key, {})[record.field] = secret
         return stored
 
+    async def llm_keys(self, session: AsyncSession, user_id: int) -> dict[str, str]:
+        """API keys by provider key, for the model endpoints a portfolio names.
+
+        Returned unmasked because this is the point of use; nothing here may be logged, echoed
+        into an event payload, or stored on an audit row.
+        """
+        keys: dict[str, str] = {}
+        for key, fields in (await self.credentials_for(session, user_id)).items():
+            secret = fields.get("api_key") or next(iter(fields.values()), "")
+            if secret:
+                keys[key] = secret
+        return keys
+
     async def build_router(self, session: AsyncSession, user_id: int) -> ProviderRouter:
         stored = await self.credentials_for(session, user_id)
 

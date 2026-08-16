@@ -4,6 +4,9 @@ from collections.abc import Sequence
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tradebot.ai.analysts import AnalystCache
+from tradebot.ai.client import AIClient
+from tradebot.ai.pipeline import AIPipeline
 from tradebot.broker.ledger import Ledger
 from tradebot.broker.service import BrokerService
 from tradebot.context import AppContext
@@ -27,11 +30,22 @@ class EngineRunner:
     def __init__(self, context: AppContext) -> None:
         self._context = context
         self._locks: dict[int, asyncio.Lock] = {}
+        self._client = AIClient(clock=context.clock)
+        self._cache = AnalystCache()
 
-    def _cycle(self) -> DecisionCycle:
+    def _cycle(self, keys: dict[str, str]) -> DecisionCycle:
         clock = self._context.clock
         broker = BrokerService(Ledger(clock=clock), self._context.events, clock=clock)
-        return DecisionCycle(broker, self._context.events, clock)
+        return DecisionCycle(
+            broker,
+            self._context.events,
+            clock,
+            ai=AIPipeline(self._client, clock, self._cache),
+            keys=keys,
+        )
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
 
     async def run_portfolio(self, portfolio_id: int, trigger: str = "scheduled") -> CycleReport:
         lock = self._locks.setdefault(portfolio_id, asyncio.Lock())
@@ -43,7 +57,8 @@ class EngineRunner:
             if portfolio is None:
                 raise RuntimeError(f"portfolio {portfolio_id} not found")
 
-            return await self._cycle().run(session, portfolio, trigger=trigger)
+            keys = await self._context.providers.llm_keys(session, portfolio.user_id)
+            return await self._cycle(keys).run(session, portfolio, trigger=trigger)
 
     async def run_due(self, cadence: str) -> list[CycleReport]:
         async with self._context.db.session() as session:

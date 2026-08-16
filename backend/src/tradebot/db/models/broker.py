@@ -11,6 +11,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -84,6 +85,10 @@ class Portfolio(Base, TimestampMixin):
     allow_fractional: Mapped[bool] = mapped_column(Boolean, default=False)
 
     benchmark: Mapped[str] = mapped_column(String(32), default="SPY")
+    ai_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    quality: Mapped[str] = mapped_column(String(16), default="balanced")
+    deliberation: Mapped[str] = mapped_column(String(32), default="firm_debate")
+    models: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     cadence: Mapped[str] = mapped_column(String(32), default="daily")
     autopilot: Mapped[bool] = mapped_column(Boolean, default=False)
     strategy: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
@@ -283,3 +288,69 @@ class DecisionRun(Base):
 
     detail: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     error: Mapped[str | None] = mapped_column(String(500), default=None)
+
+
+class AICall(Base):
+    """One model call, with its full prompt and raw response.
+
+    Stored verbatim because "why did it buy this?" is unanswerable from a summary, and the
+    dashboard's AI call log is a product surface rather than a debug aid.
+    """
+
+    __tablename__ = "ai_calls"
+    __table_args__ = (Index("ix_ai_calls_run_stage", "decision_run_id", "stage"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    decision_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("decision_runs.id", ondelete="CASCADE"), default=None, index=True
+    )
+    portfolio_id: Mapped[int] = mapped_column(
+        ForeignKey("portfolios.id", ondelete="CASCADE"), index=True
+    )
+    correlation_id: Mapped[str] = mapped_column(String(36), index=True)
+
+    stage: Mapped[str] = mapped_column(String(24))
+    model: Mapped[str] = mapped_column(String(120), default="")
+    endpoint: Mapped[str] = mapped_column(String(200), default="")
+    rung: Mapped[str] = mapped_column(String(16), default="")
+
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cached_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    cost_usd: Mapped[Decimal] = mapped_column(Numeric(18, 8), default=Decimal(0))
+
+    brief_hash: Mapped[str] = mapped_column(String(32), default="")
+    system_prompt: Mapped[str] = mapped_column(Text, default="")
+    user_prompt: Mapped[str] = mapped_column(Text, default="")
+    response: Mapped[str] = mapped_column(Text, default="")
+    attempts: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    error: Mapped[str | None] = mapped_column(String(500), default=None)
+
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, index=True)
+
+
+class Lesson(Base):
+    """A one-paragraph reflection on a closed position.
+
+    The only feedback loop that lets the system improve without a code change, so it is bounded:
+    capped in count and length where it is injected, and never able to override a guardrail.
+    """
+
+    __tablename__ = "lessons"
+    __table_args__ = (Index("ix_lessons_portfolio_closed", "portfolio_id", "closed_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    portfolio_id: Mapped[int] = mapped_column(
+        ForeignKey("portfolios.id", ondelete="CASCADE"), index=True
+    )
+    position_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+
+    closed_at: Mapped[datetime] = mapped_column(UtcDateTime, index=True)
+    holding_days: Mapped[int] = mapped_column(Integer, default=0)
+    realized_return: Mapped[Decimal] = mapped_column(Numeric(18, 8), default=Decimal(0))
+    benchmark_return: Mapped[Decimal] = mapped_column(Numeric(18, 8), default=Decimal(0))
+    alpha: Mapped[Decimal] = mapped_column(Numeric(18, 8), default=Decimal(0))
+
+    text: Mapped[str] = mapped_column(String(1200), default="")
