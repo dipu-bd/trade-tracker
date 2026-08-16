@@ -151,6 +151,42 @@ class MarketDataService:
 
         return report
 
+    async def track_symbols(
+        self,
+        session: AsyncSession,
+        symbols: Sequence[str],
+        asset_class: AssetClass,
+        *,
+        days: int = DEFAULT_HISTORY_DAYS,
+    ) -> tuple[list[Instrument], IngestReport]:
+        """Track named symbols directly, rather than whatever a provider's listing returns.
+
+        A provider's universe endpoint is a ranked list — most-actives and the like — so a name
+        outside it could never be tracked at all. A symbol whose bars do not arrive is removed
+        again rather than left behind: an instrument with no history is invisible to the screen
+        but still shows up as tracked, which reads as a silent failure.
+        """
+        entries = [
+            UniverseEntry(symbol=symbol.strip().upper(), asset_class=asset_class)
+            for symbol in symbols
+            if symbol.strip()
+        ]
+        instruments = await self.upsert_instruments(session, entries)
+        report = await self.refresh_bars(session, instruments, days=days, force=True)
+
+        kept: list[Instrument] = []
+        for instrument in instruments:
+            if instrument.first_bar_date is None:
+                await session.delete(instrument)
+                if instrument.symbol not in report.failed:
+                    report.failed.append(instrument.symbol)
+            else:
+                kept.append(instrument)
+
+        await session.flush()
+        report.instruments = len(kept)
+        return kept, report
+
     def _is_stale(self, instrument: Instrument) -> bool:
         if instrument.last_bar_date is None:
             return True

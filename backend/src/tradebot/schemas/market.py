@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class InstrumentOut(BaseModel):
@@ -73,3 +73,10 @@ class SyncResultOut(BaseModel):
     skipped_fresh: int
     failed: list[str]
     gaps: dict[str, int]
+
+
+class TrackRequest(BaseModel):
+    """Explicit symbols to start tracking, rather than a provider's ranked listing."""
+
+    symbols: list[str] = Field(min_length=1, max_length=50)
+    asset_class: str = "stock"

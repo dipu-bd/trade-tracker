@@ -268,6 +268,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/market/track": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Track
+         * @description Track named symbols and pull their history.
+         *
+         *     Separate from `/sync` because that walks a provider's ranked listing — most-actives and
+         *     similar — so any name outside it was previously unreachable.
+         */
+        post: operations["track_api_market_track_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/portfolios": {
         parameters: {
             query?: never;
@@ -2129,6 +2152,19 @@ export interface components {
             /** Expires In */
             expires_in: number;
         };
+        /**
+         * TrackRequest
+         * @description Explicit symbols to start tracking, rather than a provider's ranked listing.
+         */
+        TrackRequest: {
+            /** Symbols */
+            symbols: string[];
+            /**
+             * Asset Class
+             * @default stock
+             */
+            asset_class: string;
+        };
         /** UserOut */
         UserOut: {
             /** Id */
@@ -2538,6 +2574,39 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["SyncRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyncResultOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    track_api_market_track_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrackRequest"];
             };
         };
         responses: {

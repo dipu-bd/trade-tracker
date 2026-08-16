@@ -13,6 +13,7 @@ from tradebot.schemas.market import (
     QuoteOut,
     SyncRequest,
     SyncResultOut,
+    TrackRequest,
 )
 
 router = APIRouter(prefix="/market", tags=["market"])
@@ -168,4 +169,37 @@ async def sync(
         skipped_fresh=report.skipped_fresh if report else 0,
         failed=report.failed if report else [],
         gaps=report.gaps if report else {},
+    )
+
+
+@router.post("/track", response_model=SyncResultOut)
+async def track(
+    body: TrackRequest, user: CurrentUser, context: Context, session: DbSession
+) -> SyncResultOut:
+    """Track named symbols and pull their history.
+
+    Separate from `/sync` because that walks a provider's ranked listing — most-actives and
+    similar — so any name outside it was previously unreachable.
+    """
+    asset_class = _asset_class(body.asset_class)
+    service = await _service(context, session, user.id)
+
+    instruments, report = await service.track_symbols(session, body.symbols, asset_class)
+
+    await context.events.record(
+        session,
+        domain="market",
+        kind="symbols_tracked",
+        user_id=user.id,
+        message=", ".join(item.symbol for item in instruments) or "none",
+        payload={"tracked": len(instruments), "failed": report.failed},
+    )
+
+    return SyncResultOut(
+        asset_class=asset_class.value,
+        instruments=len(instruments),
+        bars_written=report.bars_written,
+        skipped_fresh=report.skipped_fresh,
+        failed=report.failed,
+        gaps=report.gaps,
     )

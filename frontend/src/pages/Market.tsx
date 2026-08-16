@@ -18,12 +18,29 @@ function SyncPanel() {
   const client = useQueryClient()
   const [assetClass, setAssetClass] = useState('etf')
   const [limit, setLimit] = useState(50)
+  const [symbols, setSymbols] = useState('')
+  const [trackClass, setTrackClass] = useState('stock')
 
   const sync = useMutation({
     mutationFn: () =>
       api<SyncResult>('/market/sync', {
         method: 'POST',
         body: JSON.stringify({ asset_class: assetClass, limit, refresh_bars: true }),
+      }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ['instruments'] }),
+  })
+
+  const track = useMutation({
+    mutationFn: () =>
+      api<SyncResult>('/market/track', {
+        method: 'POST',
+        body: JSON.stringify({
+          symbols: symbols
+            .split(/[,\s]+/)
+            .map((item) => item.trim().toUpperCase())
+            .filter(Boolean),
+          asset_class: trackClass,
+        }),
       }),
     onSuccess: () => void client.invalidateQueries({ queryKey: ['instruments'] }),
   })
@@ -74,6 +91,55 @@ function SyncPanel() {
           {sync.data.failed.length > 0 && ` Failed: ${sync.data.failed.join(', ')}`}
         </p>
       )}
+
+      <div className="mt-4 border-t border-[var(--color-border-subtle)] pt-4">
+        <p className="mb-3 text-sm text-[var(--color-ink-muted)]">
+          Or name symbols directly. The sync above walks a provider&rsquo;s ranked listing
+          (most-actives and similar), so anything outside it — SPGI, say — has to be asked for by
+          name. A symbol whose history does not arrive is reported rather than left half-tracked.
+        </p>
+        <div className="grid items-end gap-3 sm:grid-cols-4">
+          <div className="sm:col-span-2">
+            <Field label="Symbols">
+              <input
+                className={inputClass}
+                value={symbols}
+                onChange={(event) => setSymbols(event.target.value)}
+                placeholder="SPGI, MSFT, COST"
+              />
+            </Field>
+          </div>
+          <Field label="Asset class">
+            <select
+              className={inputClass}
+              value={trackClass}
+              onChange={(event) => setTrackClass(event.target.value)}
+            >
+              <option value="stock">stock</option>
+              <option value="etf">etf</option>
+              <option value="crypto">crypto</option>
+              <option value="commodity">commodity</option>
+            </select>
+          </Field>
+          <Button variant="primary" disabled={track.isPending} onClick={() => track.mutate()}>
+            {track.isPending ? 'Fetching…' : 'Track these'}
+          </Button>
+        </div>
+        {track.error && (
+          <p className="mt-3 text-sm text-[var(--color-loss)]">{(track.error as Error).message}</p>
+        )}
+        {track.data && (
+          <p className="mt-3 text-sm">
+            Tracked {track.data.instruments}, wrote {track.data.bars_written ?? 0} bars.
+            {track.data.failed.length > 0 && (
+              <span className="text-[var(--color-loss)]">
+                {' '}
+                No history for: {track.data.failed.join(', ')}
+              </span>
+            )}
+          </p>
+        )}
+      </div>
     </Card>
   )
 }
