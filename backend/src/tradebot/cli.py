@@ -28,8 +28,10 @@ async def seed(email: str | None) -> int:
             user = await session.scalar(stmt)
 
             if user is None:
-                print("no account found; register one first", file=sys.stderr)
-                return 1
+                # Not an error: the container seeds on every start, and the first start is
+                # always before anyone has registered.
+                print("no account yet; register, then restart to seed from the environment")
+                return 0
 
             seeded = await context.providers.seed_from_env(session, user.id, dict(os.environ))
             summary = await context.providers.masked_summary(session, user.id)

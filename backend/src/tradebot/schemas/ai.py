@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AICallOut(BaseModel):
@@ -103,3 +103,41 @@ class ChatReply(BaseModel):
     grounded_on: list[str]
     model: str
     cost_usd: Decimal
+
+
+class EndpointLimits(BaseModel):
+    rpm: int = Field(default=0, ge=0, description="Requests per minute, 0 for unlimited.")
+    rpd: int = Field(default=0, ge=0, description="Requests per day, 0 for unlimited.")
+    tpm: int = Field(default=0, ge=0, description="Tokens per minute, 0 for unlimited.")
+    concurrency: int = Field(default=4, ge=1, le=32)
+
+
+class EndpointSettings(BaseModel):
+    """One OpenAI-compatible target. No secret here — `credential` names a stored key."""
+
+    base_url: str = Field(
+        description="OpenAI-compatible base URL, e.g. https://api.groq.com/openai/v1"
+    )
+    model: str = Field(description="Model id as the provider names it.")
+    credential: str = Field(
+        description="Provider key of the stored credential holding this endpoint's API key."
+    )
+    label: str = ""
+    limits: EndpointLimits = Field(default_factory=EndpointLimits)
+
+
+class ModelSettings(BaseModel):
+    """Two tiers, each with an optional fallback for when a free tier is exhausted."""
+
+    quick: EndpointSettings | None = None
+    quick_fallback: EndpointSettings | None = None
+    deep: EndpointSettings | None = None
+    deep_fallback: EndpointSettings | None = None
+    ai_enabled: bool = False
+    quality: str = "balanced"
+    deliberation: str = "firm_debate"
+
+
+class ModelSummary(ModelSettings):
+    configured: bool
+    missing_credentials: list[str]

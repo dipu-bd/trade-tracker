@@ -18,6 +18,11 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # Carries the provider keys into the container. Compose reads .env for ${...} substitution
+    # whether or not this is here, but substitution alone never reaches the process.
+    env_file:
+      - path: .env
+        required: false
     environment:
       TRADEBOT_ENV: prod
       TRADEBOT_DATABASE_URL: postgresql+asyncpg://tradebot:${POSTGRES_PASSWORD:-tradebot}@db:5432/tradebot

@@ -52,11 +52,12 @@ async def portfolio_id(client: AsyncClient, registered: dict[str, str], context:
 
 
 async def seed_credentials(client: AsyncClient, headers: dict[str, str]) -> None:
-    await client.put(
-        "/api/credentials/openrouter",
-        json={"fields": {"api_key": KEYS["openrouter"]}},
+    response = await client.post(
+        "/api/credentials",
+        json={"provider_key": "openrouter", "field": "api_key", "secret": KEYS["openrouter"]},
         headers=headers,
     )
+    assert response.status_code == 201, response.text
 
 
 @respx.mock
@@ -313,3 +314,83 @@ async def test_an_unknown_preset_is_a_404(
     )
 
     assert response.status_code == 404
+
+
+async def test_the_model_config_can_be_written_and_read_back(
+    client: AsyncClient, registered: dict[str, str], portfolio_id: int
+) -> None:
+    """The gap that made the AI unconfigurable: nothing could write portfolio.models."""
+    await seed_credentials(client, registered)
+    body = {
+        "quick": {"base_url": QUICK, "model": "gpt-5-mini", "credential": "openrouter"},
+        "deep": {"base_url": DEEP, "model": "gpt-5", "credential": "openrouter"},
+        "ai_enabled": True,
+        "quality": "balanced",
+        "deliberation": "firm_debate",
+    }
+
+    written = await client.put(
+        f"/api/portfolios/{portfolio_id}/ai/models", json=body, headers=registered
+    )
+    read = await client.get(f"/api/portfolios/{portfolio_id}/ai/models", headers=registered)
+
+    assert written.status_code == 200, written.text
+    assert read.json()["deep"]["model"] == "gpt-5"
+    assert read.json()["configured"] is True
+    assert read.json()["missing_credentials"] == []
+    assert read.json()["ai_enabled"] is True
+
+
+async def test_the_model_config_never_returns_an_api_key(
+    client: AsyncClient, registered: dict[str, str], portfolio_id: int
+) -> None:
+    await seed_credentials(client, registered)
+    response = await client.get(f"/api/portfolios/{portfolio_id}/ai/models", headers=registered)
+
+    assert response.status_code == 200
+    assert KEYS["openrouter"] not in response.text
+
+
+async def test_an_endpoint_naming_an_unstored_credential_is_rejected(
+    client: AsyncClient, registered: dict[str, str], portfolio_id: int
+) -> None:
+    """Rejected at the moment of the mistake, not at the next decision cycle."""
+    body = {
+        "deep": {"base_url": DEEP, "model": "gpt-5", "credential": "nowhere"},
+        "ai_enabled": False,
+        "quality": "balanced",
+        "deliberation": "firm_debate",
+    }
+
+    response = await client.put(
+        f"/api/portfolios/{portfolio_id}/ai/models", json=body, headers=registered
+    )
+
+    assert response.status_code == 422
+    assert "nowhere" in response.text
+
+
+async def test_enabling_the_ai_without_a_deep_model_is_rejected(
+    client: AsyncClient, registered: dict[str, str], portfolio_id: int
+) -> None:
+    body = {"ai_enabled": True, "quality": "balanced", "deliberation": "firm_debate"}
+
+    response = await client.put(
+        f"/api/portfolios/{portfolio_id}/ai/models", json=body, headers=registered
+    )
+
+    assert response.status_code == 422
+    assert "deep model" in response.text
+
+
+async def test_an_unknown_quality_or_strategy_is_rejected(
+    client: AsyncClient, registered: dict[str, str], portfolio_id: int
+) -> None:
+    response = await client.put(
+        f"/api/portfolios/{portfolio_id}/ai/models",
+        json={"ai_enabled": False, "quality": "turbo", "deliberation": "firm_debate"},
+        headers=registered,
+    )
+
+    assert response.status_code == 422
+    assert "turbo" in response.text

@@ -5,7 +5,8 @@ from sqlalchemy import func, select
 
 from tradebot.ai.chat import AnalystChat
 from tradebot.ai.client import AIClient
-from tradebot.ai.pipeline import tiers_for
+from tradebot.ai.deliberation import STRATEGIES
+from tradebot.ai.pipeline import QUALITY_PROFILES, tiers_for
 from tradebot.api.deps import Context, CurrentUser, DbSession
 from tradebot.broker.service import load_portfolio
 from tradebot.core.errors import NotFoundError, ValidationError
@@ -19,9 +20,13 @@ from tradebot.schemas.ai import (
     CycleTimeline,
     GuardrailRow,
     LessonOut,
+    ModelSettings,
+    ModelSummary,
 )
 
 router = APIRouter(prefix="/portfolios", tags=["ai"])
+
+TIERS = ("quick", "quick_fallback", "deep", "deep_fallback")
 
 
 @router.get("/{portfolio_id}/ai/calls", response_model=list[AICallOut])
@@ -144,6 +149,75 @@ async def list_lessons(
         .limit(limit)
     )
     return [LessonOut.model_validate(row) for row in rows]
+
+
+@router.get("/{portfolio_id}/ai/models", response_model=ModelSummary)
+async def get_models(
+    portfolio_id: int, user: CurrentUser, context: Context, session: DbSession
+) -> ModelSummary:
+    """The two-tier model configuration. Never includes an API key — only which one to use."""
+    portfolio = await load_portfolio(session, portfolio_id, user.id)
+    stored = dict(portfolio.models or {})
+    settings = ModelSettings(
+        **{name: stored.get(name) for name in TIERS},
+        ai_enabled=portfolio.ai_enabled,
+        quality=portfolio.quality,
+        deliberation=portfolio.deliberation,
+    )
+
+    available = set(await context.providers.llm_keys(session, user.id))
+    wanted = {
+        endpoint.credential
+        for endpoint in (getattr(settings, name) for name in TIERS)
+        if endpoint is not None
+    }
+    return ModelSummary(
+        **settings.model_dump(),
+        configured=bool(stored),
+        missing_credentials=sorted(wanted - available),
+    )
+
+
+@router.put("/{portfolio_id}/ai/models", response_model=ModelSummary)
+async def update_models(
+    portfolio_id: int,
+    body: ModelSettings,
+    user: CurrentUser,
+    context: Context,
+    session: DbSession,
+) -> ModelSummary:
+    """Replace the model configuration.
+
+    Rejected rather than silently stored when a named credential is absent, because an endpoint
+    with no key fails at the next cycle instead of at the moment the mistake was made.
+    """
+    portfolio = await load_portfolio(session, portfolio_id, user.id)
+    if body.quality not in QUALITY_PROFILES:
+        raise ValidationError(f"unknown quality: {body.quality}")
+    if body.deliberation not in STRATEGIES:
+        raise ValidationError(f"unknown deliberation strategy: {body.deliberation}")
+    if body.ai_enabled and body.deep is None:
+        raise ValidationError("a deep model is required to enable the AI")
+
+    available = set(await context.providers.llm_keys(session, user.id))
+    for name in TIERS:
+        endpoint = getattr(body, name)
+        if endpoint is not None and endpoint.credential not in available:
+            raise ValidationError(
+                f"no stored credential named {endpoint.credential!r} for the {name} endpoint"
+            )
+
+    portfolio.models = {
+        name: endpoint.model_dump()
+        for name in TIERS
+        if (endpoint := getattr(body, name)) is not None
+    }
+    portfolio.ai_enabled = body.ai_enabled
+    portfolio.quality = body.quality
+    portfolio.deliberation = body.deliberation
+    await session.flush()
+
+    return await get_models(portfolio_id, user, context, session)
 
 
 @router.get("/{portfolio_id}/ai/summary", response_model=dict[str, Any])

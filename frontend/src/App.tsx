@@ -133,7 +133,7 @@ function Shell() {
             {tab === 'Prices' && <PriceTracking />}
             {tab === 'Providers' && <ProviderHealthPage />}
             {tab === 'Events' && <EventFeed />}
-            {tab === 'Settings' && <Settings />}
+            {tab === 'Settings' && <Settings portfolioId={active} />}
           </>
         )}
       </main>
