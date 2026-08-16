@@ -80,6 +80,27 @@ Every setting is an environment variable prefixed `TRADEBOT_`; see `.env.example
 encryption. Rotating it requires rewrapping existing credentials — changing it outright leaves
 them undecryptable.
 
+## Deployment
+
+`main` builds an image, publishes it to `ghcr.io/<owner>/<repo>`, and rolls it out over SSH; see
+`.github/workflows/deploy.yml`. The server runs `docker-compose.prod.yml`, which **pulls** the
+published tag rather than building — nothing is compiled on the host, so what runs is what CI
+tested. Rolling back is dispatching the workflow with an earlier `tag`.
+
+Repository secrets it needs:
+
+| Secret | What it is |
+|---|---|
+| `SSH_SECRET` | Private key authorised on the server |
+| `DEPLOY_HOST` | Hostname or IP |
+| `DEPLOY_USER` | SSH user, must be in the `docker` group |
+| `DEPLOY_PATH` | Directory holding the compose file and `.env` |
+| `ENV_FILE` | Full contents of the server's `.env` |
+
+`ENV_FILE` must define `TRADEBOT_SECRET_KEY` and `POSTGRES_PASSWORD`; both are required and the
+stack refuses to start without them. Provider keys belong here too if you want the container to
+seed them, though entering them in Settings is the normal path.
+
 ## Layout
 
 ```

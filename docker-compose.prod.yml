@@ -1,0 +1,38 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: tradebot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: tradebot
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tradebot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    # Pulled, never built here: the server has no build toolchain and rebuilding on deploy
+    # would ship something CI never tested.
+    image: ${TRADEBOT_IMAGE:?set TRADEBOT_IMAGE to a published tag}
+    pull_policy: always
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      TRADEBOT_ENV: prod
+      TRADEBOT_DATABASE_URL: postgresql+asyncpg://tradebot:${POSTGRES_PASSWORD:?}@db:5432/tradebot
+      TRADEBOT_SECRET_KEY: ${TRADEBOT_SECRET_KEY:?set TRADEBOT_SECRET_KEY in .env}
+      TRADEBOT_COOKIE_SECURE: ${TRADEBOT_COOKIE_SECURE:-true}
+    ports:
+      - "${TRADEBOT_PORT:-8000}:8000"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
