@@ -1,7 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
 
 import { api } from '@/api/client'
+import { useToast } from '@/components/toast'
 import {
   CartesianGrid,
   Line,
@@ -24,10 +26,24 @@ import {
   useRunCycle,
   useSnapshots,
 } from '@/api/hooks'
-import { Badge, Button, Card, Cell, Empty, Field, Row, Stat, Table, inputClass } from '@/components/ui'
+import {
+  Badge,
+  Button,
+  Card,
+  Cell,
+  Empty,
+  ErrorNote,
+  Field,
+  QueryState,
+  Row,
+  Stat,
+  Table,
+  inputClass,
+} from '@/components/ui'
 import { money, num, percent, qty, tone, when } from '@/lib/format'
 
-export function PortfolioList({ onOpen }: { onOpen: (id: number) => void }) {
+export function PortfolioList() {
+  const navigate = useNavigate()
   const portfolios = usePortfolios()
   const create = useCreatePortfolio()
   const [name, setName] = useState('')
@@ -36,10 +52,13 @@ export function PortfolioList({ onOpen }: { onOpen: (id: number) => void }) {
   return (
     <div className="grid gap-4">
       <Card title="Portfolios">
-        {portfolios.data?.length ? (
+        <QueryState query={portfolios} empty="No portfolios yet. Create one below to begin paper trading.">
           <Table head={['Name', 'Benchmark', 'Initial capital', 'Created', '']}>
-            {portfolios.data.map((row) => (
-              <Row key={row.id} onClick={() => onOpen(row.id)}>
+            {(portfolios.data ?? []).map((row) => (
+              <Row
+                key={row.id}
+                onClick={() => void navigate({ to: `/portfolios/${row.id}/detail` })}
+              >
                 <Cell>{row.name}</Cell>
                 <Cell mono>{row.base_currency}</Cell>
                 <Cell mono>{money(row.initial_capital)}</Cell>
@@ -52,9 +71,7 @@ export function PortfolioList({ onOpen }: { onOpen: (id: number) => void }) {
               </Row>
             ))}
           </Table>
-        ) : (
-          <Empty>No portfolios yet. Create one below to begin paper trading.</Empty>
-        )}
+        </QueryState>
       </Card>
 
       <Card title="New portfolio">
@@ -90,9 +107,7 @@ export function PortfolioList({ onOpen }: { onOpen: (id: number) => void }) {
             </Button>
           </div>
         </form>
-        {create.error && (
-          <p className="mt-2 text-sm text-[var(--color-loss)]">{(create.error as Error).message}</p>
-        )}
+        <ErrorNote error={create.error} className="mt-3" />
       </Card>
     </div>
   )
@@ -178,11 +193,11 @@ export function PortfolioDetailPage({ id }: { id: number }) {
       </Card>
 
       <Card title="Positions">
-        {positions.data?.length ? (
+        <QueryState query={positions} empty="No open positions.">
           <Table
             head={['Symbol', 'Name', 'Qty', 'Avg cost', 'Market value', 'Unrealized', 'Realized']}
           >
-            {positions.data.map((row) => (
+            {(positions.data ?? []).map((row) => (
               <Row key={row.id}>
                 <Cell mono>{row.symbol || `#${row.instrument_id}`}</Cell>
                 <Cell className="max-w-[16rem] truncate" title={row.name || undefined}>
@@ -200,9 +215,7 @@ export function PortfolioDetailPage({ id }: { id: number }) {
               </Row>
             ))}
           </Table>
-        ) : (
-          <Empty>No open positions.</Empty>
-        )}
+        </QueryState>
       </Card>
     </div>
   )
@@ -210,6 +223,7 @@ export function PortfolioDetailPage({ id }: { id: number }) {
 
 
 function TradeCard({ id }: { id: number }) {
+  const toast = useToast()
   const client = useQueryClient()
   const [mode, setMode] = useState<'order' | 'holding'>('order')
   const [symbol, setSymbol] = useState('')
@@ -245,6 +259,7 @@ function TradeCard({ id }: { id: number }) {
       setQty('')
       setCost('')
       refresh()
+      toast(mode === 'order' ? 'Order placed.' : 'Holding recorded.', 'ok')
     },
   })
 
@@ -336,12 +351,7 @@ function TradeCard({ id }: { id: number }) {
         </Button>
       </form>
 
-      {submit.error && (
-        <p className="mt-3 text-sm text-[var(--color-loss)]">{(submit.error as Error).message}</p>
-      )}
-      {submit.isSuccess && !submit.isPending && (
-        <p className="mt-3 text-sm text-[var(--color-ink-muted)]">Done — see the blotter below.</p>
-      )}
+      <ErrorNote error={submit.error} className="mt-3" />
     </Card>
   )
 }
@@ -356,9 +366,9 @@ export function Blotter({ id }: { id: number }) {
       <TradeCard id={id} />
 
       <Card title="Orders">
-        {orders.data?.length ? (
+        <QueryState query={orders} empty="No orders yet.">
           <Table head={['#', 'Symbol', 'Name', 'Side', 'Qty', 'Type', 'Status', 'Avg fill', 'Reason']}>
-            {orders.data.map((row) => (
+            {(orders.data ?? []).map((row) => (
               <Row key={row.id}>
                 <Cell mono>{row.id}</Cell>
                 <Cell mono>{row.symbol || `#${row.instrument_id}`}</Cell>
@@ -380,15 +390,13 @@ export function Blotter({ id }: { id: number }) {
               </Row>
             ))}
           </Table>
-        ) : (
-          <Empty>No orders yet.</Empty>
-        )}
+        </QueryState>
       </Card>
 
       <Card title="Fills">
-        {fills.data?.length ? (
+        <QueryState query={fills} empty="No fills yet.">
           <Table head={['#', 'Order', 'Qty', 'Price', 'Fee', 'Slippage', 'When']}>
-            {fills.data.map((row) => (
+            {(fills.data ?? []).map((row) => (
               <Row key={row.id}>
                 <Cell mono>{row.id}</Cell>
                 <Cell mono>{row.order_id}</Cell>
@@ -400,15 +408,13 @@ export function Blotter({ id }: { id: number }) {
               </Row>
             ))}
           </Table>
-        ) : (
-          <Empty>No fills yet.</Empty>
-        )}
+        </QueryState>
       </Card>
 
       <Card title="Ledger">
-        {ledger.data?.length ? (
+        <QueryState query={ledger} empty="The ledger is empty.">
           <Table head={['When', 'Type', 'Amount', 'Balance after', 'Memo']}>
-            {ledger.data.map((row) => (
+            {(ledger.data ?? []).map((row) => (
               <Row key={row.id}>
                 <Cell>{when(row.at)}</Cell>
                 <Cell>{row.entry_type}</Cell>
@@ -420,9 +426,7 @@ export function Blotter({ id }: { id: number }) {
               </Row>
             ))}
           </Table>
-        ) : (
-          <Empty>The ledger is empty.</Empty>
-        )}
+        </QueryState>
       </Card>
     </div>
   )

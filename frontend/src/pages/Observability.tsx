@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { subscribeToEvents } from '@/api/client'
 import { useEvents, useInstruments, useProviders } from '@/api/hooks'
 import type { EventRow } from '@/api/types'
-import { Badge, Card, Cell, Empty, Row, Stat, Table } from '@/components/ui'
+import { Badge, Card, Cell, Empty, QueryState, Row, Stat, Table } from '@/components/ui'
 import { ago, money, num, percent, when } from '@/lib/format'
 
 const STALE_SECONDS = 900
@@ -69,9 +69,9 @@ export function ProviderHealthPage() {
 
   return (
     <Card title="Provider health">
-      {providers.data?.length ? (
+      <QueryState query={providers} empty="No providers registered.">
         <Table head={['Provider', 'State', 'Capabilities', 'Error rate', 'p50 / p95', 'Detail']}>
-          {providers.data.map((row) => {
+          {(providers.data ?? []).map((row) => {
             const health = (row.health ?? {}) as Record<string, unknown>
             const circuit = String(health.circuit ?? health.state ?? 'closed')
             return (
@@ -102,9 +102,7 @@ export function ProviderHealthPage() {
             )
           })}
         </Table>
-      ) : (
-        <Empty>No providers registered.</Empty>
-      )}
+      </QueryState>
     </Card>
   )
 }

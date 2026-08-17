@@ -4,7 +4,21 @@ import { useAISummary, useApplyPreset, useLessons, usePresets, useSchedule, useS
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 import { api } from '@/api/client'
-import { Badge, Button, Card, Cell, Empty, Field, Row, Stat, Table, inputClass } from '@/components/ui'
+import { useToast } from '@/components/toast'
+import {
+  Badge,
+  Button,
+  Card,
+  Cell,
+  Empty,
+  ErrorNote,
+  Field,
+  QueryState,
+  Row,
+  Stat,
+  Table,
+  inputClass,
+} from '@/components/ui'
 import { percent, when } from '@/lib/format'
 
 
@@ -16,6 +30,7 @@ interface UniverseSpec {
 }
 
 function UniverseCard({ id }: { id: number }) {
+  const toast = useToast()
   const client = useQueryClient()
   const strategy = useStrategy(id)
   const [always, setAlways] = useState<string | null>(null)
@@ -51,6 +66,7 @@ function UniverseCard({ id }: { id: number }) {
       setAlways(null)
       setNever(null)
       void client.invalidateQueries({ queryKey: ['strategy', id] })
+      toast('Pinned symbols saved.', 'ok')
     },
   })
 
@@ -82,9 +98,7 @@ function UniverseCard({ id }: { id: number }) {
           {save.isPending ? 'Saving…' : 'Save pins'}
         </Button>
       </div>
-      {save.error && (
-        <p className="mt-3 text-sm text-[var(--color-loss)]">{(save.error as Error).message}</p>
-      )}
+      <ErrorNote error={save.error} className="mt-3" />
     </Card>
   )
 }
@@ -197,9 +211,9 @@ export function StrategyPage({ id }: { id: number }) {
       </Card>
 
       <Card title="Reflection memory">
-        {lessons.data?.length ? (
+        <QueryState query={lessons} empty="No lessons yet. They are written when a position closes.">
           <Table head={['Symbol', 'Held', 'Return', 'Alpha', 'Lesson']}>
-            {lessons.data.map((row) => (
+            {(lessons.data ?? []).map((row) => (
               <Row key={row.id}>
                 <Cell mono>{row.symbol}</Cell>
                 <Cell mono>{row.holding_days}d</Cell>
@@ -209,15 +223,13 @@ export function StrategyPage({ id }: { id: number }) {
               </Row>
             ))}
           </Table>
-        ) : (
-          <Empty>No lessons yet. They are written when a position closes.</Empty>
-        )}
+        </QueryState>
       </Card>
 
       <Card title="Schedule">
-        {schedule.data?.length ? (
+        <QueryState query={schedule} empty="The scheduler is not running in this process.">
           <Table head={['Job', 'Cron (UTC)', 'Next run']}>
-            {schedule.data.map((job) => (
+            {(schedule.data ?? []).map((job) => (
               <Row key={job.id}>
                 <Cell mono>{job.id}</Cell>
                 <Cell mono>{job.cron}</Cell>
@@ -225,9 +237,7 @@ export function StrategyPage({ id }: { id: number }) {
               </Row>
             ))}
           </Table>
-        ) : (
-          <Empty>The scheduler is not running in this process.</Empty>
-        )}
+        </QueryState>
       </Card>
     </div>
   )

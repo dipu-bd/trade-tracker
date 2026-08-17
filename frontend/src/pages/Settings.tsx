@@ -2,8 +2,21 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 
 import { api } from '@/api/client'
+import { useToast } from '@/components/toast'
 import { useProviders } from '@/api/hooks'
-import { Badge, Button, Card, Cell, Empty, Field, Row, Table, inputClass } from '@/components/ui'
+import {
+  Badge,
+  Button,
+  Card,
+  Cell,
+  Empty,
+  ErrorNote,
+  Field,
+  QueryState,
+  Row,
+  Table,
+  inputClass,
+} from '@/components/ui'
 import { when } from '@/lib/format'
 
 interface Credential {
@@ -67,6 +80,7 @@ export function Settings({ portfolioId }: { portfolioId: number | null }) {
 }
 
 function CredentialsCard() {
+  const toast = useToast()
   const client = useQueryClient()
   const credentials = useQuery({
     queryKey: ['credentials'],
@@ -96,6 +110,7 @@ function CredentialsCard() {
       setSecret('')
       setProviderKey('')
       invalidate()
+      toast('Credential stored.', 'ok')
     },
   })
 
@@ -153,13 +168,11 @@ function CredentialsCard() {
         </Button>
       </form>
 
-      {store.error && (
-        <p className="mb-3 text-sm text-[var(--color-loss)]">{(store.error as Error).message}</p>
-      )}
+      <ErrorNote error={store.error} className="mb-3" />
 
-      {credentials.data?.length ? (
+      <QueryState query={credentials} empty="No credentials stored.">
         <Table head={['Provider', 'Field', 'Value', 'Added', '']}>
-          {credentials.data.map((row) => (
+          {(credentials.data ?? []).map((row) => (
             <Row key={row.id}>
               <Cell mono>{row.provider_key}</Cell>
               <Cell>{row.field}</Cell>
@@ -173,9 +186,7 @@ function CredentialsCard() {
             </Row>
           ))}
         </Table>
-      ) : (
-        <Empty>No credentials stored.</Empty>
-      )}
+      </QueryState>
     </Card>
   )
 }
@@ -305,12 +316,8 @@ function NotificationsCard({ portfolioId }: { portfolioId: number }) {
           <span className="text-[var(--color-ink-muted)]">Not configured.</span>
         )}
       </p>
-      {save.error && (
-        <p className="mt-2 text-sm text-[var(--color-loss)]">{(save.error as Error).message}</p>
-      )}
-      {test.error && (
-        <p className="mt-2 text-sm text-[var(--color-loss)]">{(test.error as Error).message}</p>
-      )}
+      <ErrorNote error={save.error} className="mt-3" />
+      <ErrorNote error={test.error} className="mt-3" />
       {test.isSuccess && !test.isPending && (
         <p className="mt-2 text-sm text-[var(--color-ink-muted)]">Test message sent.</p>
       )}
@@ -370,9 +377,9 @@ function ProfilesCard() {
         changes every portfolio using it.
       </p>
 
-      {profiles.data?.length ? (
+      <QueryState query={profiles} empty="No model profiles yet.">
         <Table head={['Name', 'Deep model', 'Quality', 'Strategy', 'Used by', '']}>
-          {profiles.data.map((row) => (
+          {(profiles.data ?? []).map((row) => (
             <Row key={row.id}>
               <Cell mono>{row.name}</Cell>
               <Cell mono>{row.deep?.model ?? '—'}</Cell>
@@ -392,9 +399,7 @@ function ProfilesCard() {
             </Row>
           ))}
         </Table>
-      ) : (
-        <Empty>No model profiles yet.</Empty>
-      )}
+      </QueryState>
 
       {draft === null ? (
         <div className="mt-3">
@@ -541,9 +546,7 @@ function ModelsCard({ portfolioId }: { portfolioId: number }) {
           No stored credential named: {current.missing_credentials.join(', ')}
         </p>
       )}
-      {select.error && (
-        <p className="mt-3 text-sm text-[var(--color-loss)]">{(select.error as Error).message}</p>
-      )}
+      <ErrorNote error={select.error} className="mt-3" />
     </Card>
   )
 }
@@ -652,9 +655,9 @@ function ProvidersCard() {
 
   return (
     <Card title="Provider capabilities">
-      {providers.data?.length ? (
+      <QueryState query={providers} empty="No providers registered.">
         <Table head={['Provider', 'Keyless', 'Configured', 'Capabilities', 'Missing']}>
-          {providers.data.map((row) => (
+          {(providers.data ?? []).map((row) => (
             <Row key={row.provider}>
               <Cell mono>{row.provider}</Cell>
               <Cell>{row.keyless ? 'yes' : 'no'}</Cell>
@@ -670,9 +673,7 @@ function ProvidersCard() {
             </Row>
           ))}
         </Table>
-      ) : (
-        <Empty>No providers registered.</Empty>
-      )}
+      </QueryState>
     </Card>
   )
 }

@@ -4,12 +4,23 @@ import { useEffect, useRef, useState } from 'react'
 
 import { api } from '@/api/client'
 import { useBars, useInstruments } from '@/api/hooks'
-import { Button, Card, Cell, Empty, Field, Row, Table, inputClass } from '@/components/ui'
+import {
+  Button,
+  Card,
+  Cell,
+  ErrorNote,
+  Field,
+  QueryState,
+  Row,
+  Table,
+  inputClass,
+} from '@/components/ui'
 import { ago, money, num } from '@/lib/format'
 
 interface SyncStatus {
   label: string
   running: boolean
+  started_at: string | null
   done: number
   total: number
   current: string
@@ -94,15 +105,22 @@ function SyncPanel() {
 
   return (
     <Card title="Market sync">
-      <p className="mb-3 text-sm text-[var(--color-ink-muted)]">
+      <p className="mb-2 text-sm text-[var(--color-ink-muted)]">
         One pass over every asset class you tick: the universe, the daily bars and the last price.
-        A full pass is thousands of provider calls, so it runs in the background and reports
-        progress here — closing this page does not stop it. Leave the symbol box empty to walk
-        each class&rsquo;s ranked listing (most-actives and similar), or name symbols to pull
-        exactly those: anything outside those listings — SPGI, say — is only reachable by name. A
-        name needs about 260 sessions of history before the momentum rank and the 200-day filter
-        are defined. A background job repeats this on its own schedule.
+        It runs in the background, so closing this page does not stop it.
       </p>
+      <details className="mb-3 text-sm text-[var(--color-ink-muted)]">
+        <summary className="cursor-pointer text-[var(--color-ink-faint)] hover:text-[var(--color-ink-muted)]">
+          How the universe is chosen
+        </summary>
+        <p className="mt-2">
+          Leave the symbol box empty to walk each class&rsquo;s ranked listing (most-actives and
+          similar), or name symbols to pull exactly those: anything outside those listings — SPGI,
+          say — is only reachable by name. A name needs about 260 sessions of history before the
+          momentum rank and the 200-day filter are defined. A background job repeats this on its
+          own schedule.
+        </p>
+      </details>
 
       <div className="mb-3 flex flex-wrap gap-3">
         {ASSET_CLASSES.map((name) => (
@@ -153,10 +171,8 @@ function SyncPanel() {
         </Button>
       </div>
 
-      {start.error && (
-        <p className="mt-3 text-sm text-[var(--color-loss)]">{(start.error as Error).message}</p>
-      )}
-      {status.data && <Progress status={status.data} />}
+      <ErrorNote error={start.error} className="mt-3" />
+      {status.data?.started_at && <Progress status={status.data} />}
     </Card>
   )
 }
@@ -172,10 +188,10 @@ export function MarketExplorer() {
       <SyncPanel />
       <div className="grid gap-4 lg:grid-cols-[1fr_2fr]">
       <Card title="Instruments">
-        {instruments.data?.length ? (
+        <QueryState query={instruments} empty="No instruments tracked.">
           <div className="max-h-[32rem] overflow-y-auto">
             <Table head={['Symbol', 'Name', 'Class', 'Last', 'Quoted']}>
-              {instruments.data.map((row) => (
+              {(instruments.data ?? []).map((row) => (
                 <Row
                   key={row.id}
                   onClick={() => setSymbol(row.symbol)}
@@ -192,9 +208,7 @@ export function MarketExplorer() {
               ))}
             </Table>
           </div>
-        ) : (
-          <Empty>No instruments tracked.</Empty>
-        )}
+        </QueryState>
       </Card>
 
       <Card
@@ -204,9 +218,9 @@ export function MarketExplorer() {
             : 'Select an instrument'
         }
       >
-        {bars.data?.length ? (
+        <QueryState query={bars} empty={<>{symbol ? 'No stored bars for this instrument.' : 'Pick a symbol to chart it.'}</>}>
           <CandleChart
-            data={bars.data.map((bar) => ({
+            data={(bars.data ?? []).map((bar) => ({
               time: bar.bar_date,
               open: num(bar.open),
               high: num(bar.high),
@@ -214,9 +228,7 @@ export function MarketExplorer() {
               close: num(bar.close),
             }))}
           />
-        ) : (
-          <Empty>{symbol ? 'No stored bars for this instrument.' : 'Pick a symbol to chart it.'}</Empty>
-        )}
+        </QueryState>
         </Card>
       </div>
     </div>

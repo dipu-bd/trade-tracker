@@ -2,7 +2,19 @@ import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
 
 import { api } from '@/api/client'
-import { Badge, Button, Card, Cell, Empty, Field, Row, Stat, Table, inputClass } from '@/components/ui'
+import {
+  Badge,
+  Button,
+  Card,
+  Cell,
+  Empty,
+  ErrorNote,
+  Field,
+  Row,
+  Stat,
+  Table,
+  inputClass,
+} from '@/components/ui'
 import { num, percent } from '@/lib/format'
 
 interface Deflated {
@@ -101,7 +113,7 @@ export function Backtest({ id }: { id: number }) {
 
       {run.error && (
         <Card title="Failed">
-          <p className="text-sm text-[var(--color-loss)]">{(run.error as Error).message}</p>
+          <ErrorNote error={run.error} />
         </Card>
       )}
 

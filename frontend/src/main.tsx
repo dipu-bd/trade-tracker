@@ -3,6 +3,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import { App } from '@/App'
+import { ToastProvider } from '@/components/toast'
 import { AuthProvider } from '@/auth'
 import '@/index.css'
 
@@ -19,7 +20,9 @@ createRoot(root).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <App />
+        <ToastProvider>
+          <App />
+        </ToastProvider>
       </AuthProvider>
     </QueryClientProvider>
   </StrictMode>,

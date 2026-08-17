@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
 import { useAICall, useAICalls, useAISpend, useCycles, useTimeline } from '@/api/hooks'
-import { Badge, Card, Cell, Empty, Row, Stat, Table } from '@/components/ui'
+import { Badge, Card, Cell, Empty, QueryState, Row, Stat, Table } from '@/components/ui'
 import { money, num, when } from '@/lib/format'
 
 const CLAMP_TONE: Record<string, 'bad' | 'warn'> = {
@@ -41,9 +41,9 @@ export function AICallLog({ portfolioId }: { portfolioId: number }) {
       </Card>
 
       <Card title="Decision cycles">
-        {cycles.data?.length ? (
+        <QueryState query={cycles} empty="No cycles have run yet.">
           <Table head={['Run', 'Regime', 'Entries', 'Orders', 'Status']}>
-            {cycles.data.map((run) => (
+            {(cycles.data ?? []).map((run) => (
               <Row key={run.id} onClick={() => setRunId(run.id)}>
                 <Cell mono>#{run.id}</Cell>
                 <Cell>{run.regime || '—'}</Cell>
@@ -55,15 +55,13 @@ export function AICallLog({ portfolioId }: { portfolioId: number }) {
               </Row>
             ))}
           </Table>
-        ) : (
-          <Empty>No cycles have run yet.</Empty>
-        )}
+        </QueryState>
       </Card>
 
       <Card title="Model calls">
-        {calls.data?.length ? (
+        <QueryState query={calls} empty="No model calls recorded. The AI layer may be disabled.">
           <Table head={['Stage', 'Model', 'Rung', 'Tokens', 'Latency', 'Cost']}>
-            {calls.data.map((call) => (
+            {(calls.data ?? []).map((call) => (
               <Row key={call.id} onClick={() => setCallId(call.id)}>
                 <Cell>{call.stage}</Cell>
                 <Cell mono>{call.model}</Cell>
@@ -76,9 +74,7 @@ export function AICallLog({ portfolioId }: { portfolioId: number }) {
               </Row>
             ))}
           </Table>
-        ) : (
-          <Empty>No model calls recorded. The AI layer may be disabled.</Empty>
-        )}
+        </QueryState>
       </Card>
 
       {timeline.data && (
