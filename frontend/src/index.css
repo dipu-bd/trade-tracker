@@ -20,6 +20,16 @@
   --color-warn: oklch(0.8 0.14 75);
 }
 
+/* Outside @theme deliberately: lightweight-charts parses colors itself and rejects oklch, and a
+   value declared as a theme color is rewritten by Tailwind (rgb() in dev, hex in the build). These
+   are sRGB equivalents of the ink, border, gain and loss tokens above. */
+:root {
+  --color-chart-ink: #9a9fa6;
+  --color-chart-grid: #272c33;
+  --color-chart-gain: #42cb80;
+  --color-chart-loss: #f75d59;
+}
+
 html,
 body,
 #root {

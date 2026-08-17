@@ -70,20 +70,16 @@ class MarketSync:
         return total
 
     async def refresh_all(self, *, progress: ProgressFn = _noop) -> IngestReport:
-        """Bars for anything gone stale, and a fresh price for everything already tracked.
-
-        Quotes for a closed exchange would spend a provider call to restate yesterday's close,
-        so equities are skipped outside their session while 24/7 sleeves always run.
-        """
+        """Bars for anything gone stale, and a fresh price for everything already tracked."""
         total = IngestReport()
 
         async with self._context.db.session() as session:
             instruments = list(
                 await session.scalars(
-                    select(Instrument).where(
-                        Instrument.is_active.is_(True),
-                        Instrument.first_bar_date.is_not(None),
-                    )
+                    # Deliberately not filtered on first_bar_date: an instrument with no bars
+                    # is the one that most needs a fetch, and excluding it meant a name whose
+                    # first bar fetch failed could never recover.
+                    select(Instrument).where(Instrument.is_active.is_(True))
                 )
             )
             owners = await self._owners(session)
@@ -139,4 +135,18 @@ class MarketSync:
         return MarketDataService(router, self._context.events, clock=self._context.clock)
 
     def _quotable(self, instrument: Instrument) -> bool:
-        return calendar.is_open(self._context.clock.now(), AssetClass(instrument.asset_class))
+        """Open markets always; a closed one only until its last close is on record.
+
+        Polling a shut exchange every 15 minutes spends provider calls to restate the same
+        close, but skipping it outright left every equity blank until someone happened to look
+        during US hours.
+        """
+        asset_class = AssetClass(instrument.asset_class)
+        now = self._context.clock.now()
+        if calendar.is_open(now, asset_class):
+            return True
+        if calendar.is_24x7(asset_class):
+            return True
+        return instrument.last_quote_at is None or instrument.last_quote_at < calendar.last_close(
+            now
+        )

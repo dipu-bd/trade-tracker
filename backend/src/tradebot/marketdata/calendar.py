@@ -45,6 +45,20 @@ def is_open(moment: datetime, asset_class: AssetClass = AssetClass.STOCK) -> boo
     return open_at <= moment.astimezone(UTC) < close_at
 
 
+def last_close(moment: datetime) -> datetime:
+    """End of the most recent completed regular session, at or before `moment`."""
+    today = moment.astimezone(NYSE_TZ).date()
+    bounds = session_bounds(today)
+    if bounds is not None and moment.astimezone(UTC) >= bounds[1]:
+        return bounds[1]
+    cursor = previous_trading_day(today)
+    while True:
+        bounds = session_bounds(cursor)
+        if bounds is not None:
+            return bounds[1]
+        cursor = previous_trading_day(cursor)
+
+
 def previous_trading_day(day: date, asset_class: AssetClass = AssetClass.STOCK) -> date:
     if is_24x7(asset_class):
         return day - timedelta(days=1)

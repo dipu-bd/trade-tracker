@@ -7,7 +7,7 @@ from sqlalchemy import select
 from tests.fakes import FakeProvider, FlakyProvider
 from tradebot.context import AppContext
 from tradebot.core.clock import FrozenClock
-from tradebot.db.models import Instrument, PriceBar
+from tradebot.db.models import Instrument, Portfolio, PriceBar, User
 from tradebot.marketdata.service import MarketDataService
 from tradebot.providers.base import AssetClass, Bar, ProviderConfig, UniverseEntry
 from tradebot.providers.router import ProviderRouter
@@ -280,3 +280,53 @@ async def test_the_unified_sync_tracks_named_symbols_outside_the_listing(
 
     assert [i.symbol for i in instruments] == ["ZZZ"]
     assert report.quotes_updated == 1
+
+
+async def test_a_bar_less_instrument_is_still_refreshed(context: AppContext) -> None:
+    """It used to be filtered out of every refresh, so a failed first fetch never recovered."""
+    from tradebot.marketdata.refresh import MarketSync
+
+    async with context.db.session() as session:
+        user = User(email="owner@example.com", password_hash="x", display_name="Owner")
+        session.add(user)
+        await session.flush()
+        session.add(Instrument(symbol="AAA", asset_class="stock", is_active=True))
+        session.add(
+            Portfolio(user_id=user.id, name="p", initial_capital=Decimal(1000), base_currency="USD")
+        )
+        await session.flush()
+
+    report = await MarketSync(context).refresh_all()
+
+    assert report.instruments == 1
+
+
+@pytest.mark.parametrize(
+    ("now", "last_quote_at", "quotable"),
+    [
+        (datetime(2026, 8, 17, 15, 0, tzinfo=UTC), None, True),
+        (datetime(2026, 8, 17, 15, 0, tzinfo=UTC), datetime(2026, 8, 14, 20, 30, tzinfo=UTC), True),
+        (datetime(2026, 8, 17, 2, 0, tzinfo=UTC), None, True),
+        (
+            datetime(2026, 8, 17, 2, 0, tzinfo=UTC),
+            datetime(2026, 8, 14, 20, 30, tzinfo=UTC),
+            False,
+        ),
+        (datetime(2026, 8, 17, 2, 0, tzinfo=UTC), datetime(2026, 8, 13, 20, 30, tzinfo=UTC), True),
+    ],
+)
+def test_a_closed_market_is_quoted_once_then_left_alone(
+    context: AppContext,
+    now: datetime,
+    last_quote_at: datetime | None,
+    quotable: bool,
+) -> None:
+    """Before this, an equity synced outside US hours stayed blank until someone looked in them."""
+    from dataclasses import replace
+
+    from tradebot.marketdata.refresh import MarketSync
+
+    sync = MarketSync(replace(context, clock=FrozenClock(now)))
+    instrument = Instrument(symbol="AAA", asset_class="stock", last_quote_at=last_quote_at)
+
+    assert sync._quotable(instrument) is quotable

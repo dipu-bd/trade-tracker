@@ -250,20 +250,32 @@ function CandleChart({ data }: { data: Candle[] }) {
   useEffect(() => {
     if (!container.current) return
 
+    const token = (name: string) =>
+      getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+
     const instance = createChart(container.current, {
       height: 380,
       layout: {
         background: { color: 'transparent' },
-        textColor: getComputedStyle(document.documentElement).getPropertyValue('--color-ink-muted'),
+        textColor: token('--color-chart-ink'),
       },
       grid: {
-        vertLines: { color: 'rgba(127,127,127,0.1)' },
-        horzLines: { color: 'rgba(127,127,127,0.1)' },
+        vertLines: { color: token('--color-chart-grid') },
+        horzLines: { color: token('--color-chart-grid') },
       },
       timeScale: { borderVisible: false },
       rightPriceScale: { borderVisible: false },
     })
-    const series = instance.addCandlestickSeries()
+    const up = token('--color-chart-gain')
+    const down = token('--color-chart-loss')
+    const series = instance.addCandlestickSeries({
+      upColor: up,
+      downColor: down,
+      borderUpColor: up,
+      borderDownColor: down,
+      wickUpColor: up,
+      wickDownColor: down,
+    })
     series.setData(data)
     instance.timeScale().fitContent()
     chart.current = instance
