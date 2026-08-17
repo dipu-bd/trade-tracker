@@ -11,7 +11,20 @@ interface SyncResult {
   asset_class: string
   instruments: number
   bars_written: number | null
+  quotes_updated: number | null
   failed: string[]
+}
+
+function Outcome({ result }: { result: SyncResult }) {
+  return (
+    <p className="mt-3 text-sm">
+      {result.instruments} instruments, {result.bars_written ?? 0} bars,{' '}
+      {result.quotes_updated ?? 0} prices.
+      {result.failed.length > 0 && (
+        <span className="text-[var(--color-loss)]"> No history for: {result.failed.join(', ')}</span>
+      )}
+    </p>
+  )
 }
 
 function SyncPanel() {
@@ -19,42 +32,52 @@ function SyncPanel() {
   const [assetClass, setAssetClass] = useState('etf')
   const [limit, setLimit] = useState(50)
   const [symbols, setSymbols] = useState('')
-  const [trackClass, setTrackClass] = useState('stock')
+
+  const invalidate = () => void client.invalidateQueries({ queryKey: ['instruments'] })
 
   const sync = useMutation({
     mutationFn: () =>
       api<SyncResult>('/market/sync', {
         method: 'POST',
-        body: JSON.stringify({ asset_class: assetClass, limit, refresh_bars: true }),
-      }),
-    onSuccess: () => void client.invalidateQueries({ queryKey: ['instruments'] }),
-  })
-
-  const track = useMutation({
-    mutationFn: () =>
-      api<SyncResult>('/market/track', {
-        method: 'POST',
         body: JSON.stringify({
+          asset_class: assetClass,
+          limit,
           symbols: symbols
             .split(/[,\s]+/)
             .map((item) => item.trim().toUpperCase())
             .filter(Boolean),
-          asset_class: trackClass,
         }),
       }),
-    onSuccess: () => void client.invalidateQueries({ queryKey: ['instruments'] }),
+    onSuccess: invalidate,
+  })
+
+  const refresh = useMutation({
+    mutationFn: () => api<SyncResult>('/market/refresh', { method: 'POST' }),
+    onSuccess: invalidate,
   })
 
   return (
-    <Card title="Track instruments">
+    <Card title="Market sync">
       <p className="mb-3 text-sm text-[var(--color-ink-muted)]">
-        The engine only ever considers instruments it already tracks with stored bars — nothing
-        is discovered automatically. Sync once to populate the universe; a daily job keeps the
-        bars current after that. A name needs about 260 sessions of history before the momentum
-        rank and the 200-day filter are defined, so a fresh sync may screen out everything for a
-        moment.
+        One pass over the universe, the daily bars and the last price. The engine only ever
+        considers instruments it already tracks with stored bars — nothing is discovered
+        automatically. Leave the symbol box empty to walk the provider&rsquo;s ranked listing
+        (most-actives and similar), or name symbols to pull exactly those: anything outside that
+        listing — SPGI, say — is only reachable by name. A name needs about 260 sessions of
+        history before the momentum rank and the 200-day filter are defined. After this, a
+        background job keeps bars and prices current on its own.
       </p>
       <div className="grid items-end gap-3 sm:grid-cols-4">
+        <div className="sm:col-span-2">
+          <Field label="Symbols (blank for the provider listing)">
+            <input
+              className={inputClass}
+              value={symbols}
+              onChange={(event) => setSymbols(event.target.value)}
+              placeholder="SPGI, MSFT, COST"
+            />
+          </Field>
+        </div>
         <Field label="Asset class">
           <select
             className={inputClass}
@@ -67,7 +90,7 @@ function SyncPanel() {
             <option value="commodity">commodity</option>
           </select>
         </Field>
-        <Field label="Max symbols">
+        <Field label="Max symbols (listing only)">
           <input
             type="number"
             min={1}
@@ -77,69 +100,25 @@ function SyncPanel() {
             onChange={(event) => setLimit(Number(event.target.value))}
           />
         </Field>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-3">
         <Button variant="primary" disabled={sync.isPending} onClick={() => sync.mutate()}>
-          {sync.isPending ? 'Fetching…' : 'Sync and fetch bars'}
+          {sync.isPending ? 'Syncing…' : 'Sync now'}
+        </Button>
+        <Button disabled={refresh.isPending} onClick={() => refresh.mutate()}>
+          {refresh.isPending ? 'Refreshing…' : 'Refresh everything tracked'}
         </Button>
       </div>
 
       {sync.error && (
         <p className="mt-3 text-sm text-[var(--color-loss)]">{(sync.error as Error).message}</p>
       )}
-      {sync.data && (
-        <p className="mt-3 text-sm">
-          Tracked {sync.data.instruments} instruments, wrote {sync.data.bars_written ?? 0} bars.
-          {sync.data.failed.length > 0 && ` Failed: ${sync.data.failed.join(', ')}`}
-        </p>
+      {sync.data && <Outcome result={sync.data} />}
+      {refresh.error && (
+        <p className="mt-3 text-sm text-[var(--color-loss)]">{(refresh.error as Error).message}</p>
       )}
-
-      <div className="mt-4 border-t border-[var(--color-border-subtle)] pt-4">
-        <p className="mb-3 text-sm text-[var(--color-ink-muted)]">
-          Or name symbols directly. The sync above walks a provider&rsquo;s ranked listing
-          (most-actives and similar), so anything outside it — SPGI, say — has to be asked for by
-          name. A symbol whose history does not arrive is reported rather than left half-tracked.
-        </p>
-        <div className="grid items-end gap-3 sm:grid-cols-4">
-          <div className="sm:col-span-2">
-            <Field label="Symbols">
-              <input
-                className={inputClass}
-                value={symbols}
-                onChange={(event) => setSymbols(event.target.value)}
-                placeholder="SPGI, MSFT, COST"
-              />
-            </Field>
-          </div>
-          <Field label="Asset class">
-            <select
-              className={inputClass}
-              value={trackClass}
-              onChange={(event) => setTrackClass(event.target.value)}
-            >
-              <option value="stock">stock</option>
-              <option value="etf">etf</option>
-              <option value="crypto">crypto</option>
-              <option value="commodity">commodity</option>
-            </select>
-          </Field>
-          <Button variant="primary" disabled={track.isPending} onClick={() => track.mutate()}>
-            {track.isPending ? 'Fetching…' : 'Track these'}
-          </Button>
-        </div>
-        {track.error && (
-          <p className="mt-3 text-sm text-[var(--color-loss)]">{(track.error as Error).message}</p>
-        )}
-        {track.data && (
-          <p className="mt-3 text-sm">
-            Tracked {track.data.instruments}, wrote {track.data.bars_written ?? 0} bars.
-            {track.data.failed.length > 0 && (
-              <span className="text-[var(--color-loss)]">
-                {' '}
-                No history for: {track.data.failed.join(', ')}
-              </span>
-            )}
-          </p>
-        )}
-      </div>
+      {refresh.data && <Outcome result={refresh.data} />}
     </Card>
   )
 }

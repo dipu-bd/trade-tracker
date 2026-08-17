@@ -32,9 +32,18 @@ MAX_STALE_DAYS = 1
 class IngestReport:
     instruments: int = 0
     bars_written: int = 0
+    quotes_updated: int = 0
     skipped_fresh: int = 0
     failed: list[str] = field(default_factory=list)
     gaps: dict[str, int] = field(default_factory=dict)
+
+    def absorb(self, other: "IngestReport") -> None:
+        self.instruments += other.instruments
+        self.bars_written += other.bars_written
+        self.quotes_updated += other.quotes_updated
+        self.skipped_fresh += other.skipped_fresh
+        self.failed.extend(other.failed)
+        self.gaps.update(other.gaps)
 
 
 class MarketDataService:
@@ -151,13 +160,51 @@ class MarketDataService:
 
         return report
 
-    async def track_symbols(
+    async def sync(
+        self,
+        session: AsyncSession,
+        asset_class: AssetClass,
+        *,
+        symbols: Sequence[str] = (),
+        limit: int = 200,
+        days: int = DEFAULT_HISTORY_DAYS,
+        with_bars: bool = True,
+        with_quotes: bool = True,
+    ) -> tuple[list[Instrument], IngestReport]:
+        """One path for everything that populates the store: universe, bars and prices.
+
+        Naming symbols pulls exactly those and forces their history; naming none walks the
+        provider's ranked listing and refreshes only what has gone stale.
+        """
+        if symbols:
+            instruments, report = await self._track_symbols(
+                session, symbols, asset_class, days=days, with_bars=with_bars
+            )
+        else:
+            instruments = await self.sync_universe(session, asset_class, limit=limit)
+            report = (
+                await self.refresh_bars(session, instruments, days=days)
+                if with_bars
+                else IngestReport(instruments=len(instruments))
+            )
+
+        if with_quotes and instruments:
+            report.quotes_updated = await self.refresh_quotes(session, instruments)
+        return instruments, report
+
+    async def refresh_quotes(self, session: AsyncSession, instruments: Sequence[Instrument]) -> int:
+        """Stamp the last traded price onto each instrument. Returns how many moved."""
+        quotes = await self.get_quotes(session, instruments)
+        return sum(1 for instrument in instruments if instrument.symbol in quotes)
+
+    async def _track_symbols(
         self,
         session: AsyncSession,
         symbols: Sequence[str],
         asset_class: AssetClass,
         *,
         days: int = DEFAULT_HISTORY_DAYS,
+        with_bars: bool = True,
     ) -> tuple[list[Instrument], IngestReport]:
         """Track named symbols directly, rather than whatever a provider's listing returns.
 
@@ -173,6 +220,8 @@ class MarketDataService:
             for symbol in wanted
         ]
         instruments = await self.upsert_instruments(session, entries)
+        if not with_bars:
+            return instruments, IngestReport(instruments=len(instruments))
         report = await self.refresh_bars(session, instruments, days=days, force=True)
 
         kept: list[Instrument] = []

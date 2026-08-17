@@ -259,7 +259,10 @@ export interface paths {
         put?: never;
         /**
          * Sync
-         * @description Refresh the tracked universe for one asset class, optionally pulling bars too.
+         * @description Populate the store: universe, daily bars and last price, in one call.
+         *
+         *     Naming symbols pulls exactly those — a provider's listing is ranked (most-actives and
+         *     similar), so anything outside it was previously unreachable.
          */
         post: operations["sync_api_market_sync_post"];
         delete?: never;
@@ -268,7 +271,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/market/track": {
+    "/api/market/refresh": {
         parameters: {
             query?: never;
             header?: never;
@@ -278,13 +281,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Track
-         * @description Track named symbols and pull their history.
-         *
-         *     Separate from `/sync` because that walks a provider's ranked listing — most-actives and
-         *     similar — so any name outside it was previously unreachable.
+         * Refresh
+         * @description Run the periodic refresh now, over every tracked instrument, for every owner.
          */
-        post: operations["track_api_market_track_post"];
+        post: operations["refresh_api_market_refresh_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2128,10 +2128,19 @@ export interface components {
                 [key: string]: unknown;
             };
         };
-        /** SyncRequest */
+        /**
+         * SyncRequest
+         * @description One request for the whole store. Name symbols to pull exactly those; name none to walk
+         *     the provider's ranked listing instead.
+         */
         SyncRequest: {
-            /** Asset Class */
+            /**
+             * Asset Class
+             * @default stock
+             */
             asset_class: string;
+            /** Symbols */
+            symbols?: string[];
             /**
              * Limit
              * @default 200
@@ -2139,9 +2148,14 @@ export interface components {
             limit: number;
             /**
              * Refresh Bars
-             * @default false
+             * @default true
              */
             refresh_bars: boolean;
+            /**
+             * Refresh Quotes
+             * @default true
+             */
+            refresh_quotes: boolean;
         };
         /** SyncResultOut */
         SyncResultOut: {
@@ -2151,12 +2165,20 @@ export interface components {
             instruments: number;
             /** Bars Written */
             bars_written: number;
-            /** Skipped Fresh */
+            /**
+             * Quotes Updated
+             * @default 0
+             */
+            quotes_updated: number;
+            /**
+             * Skipped Fresh
+             * @default 0
+             */
             skipped_fresh: number;
             /** Failed */
-            failed: string[];
+            failed?: string[];
             /** Gaps */
-            gaps: {
+            gaps?: {
                 [key: string]: number;
             };
         };
@@ -2171,19 +2193,6 @@ export interface components {
             token_type: string;
             /** Expires In */
             expires_in: number;
-        };
-        /**
-         * TrackRequest
-         * @description Explicit symbols to start tracking, rather than a provider's ranked listing.
-         */
-        TrackRequest: {
-            /** Symbols */
-            symbols: string[];
-            /**
-             * Asset Class
-             * @default stock
-             */
-            asset_class: string;
         };
         /** UserOut */
         UserOut: {
@@ -2617,18 +2626,14 @@ export interface operations {
             };
         };
     };
-    track_api_market_track_post: {
+    refresh_api_market_refresh_post: {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TrackRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -2637,15 +2642,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SyncResultOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

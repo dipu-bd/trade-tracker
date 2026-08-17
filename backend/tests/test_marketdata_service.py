@@ -250,3 +250,33 @@ async def test_staleness_rules(context: AppContext, last_bar: date | None, stale
     instrument = Instrument(symbol="AAA", asset_class="crypto", last_bar_date=last_bar)
 
     assert service._is_stale(instrument) is stale
+
+
+async def test_the_unified_sync_pulls_universe_bars_and_price_in_one_pass(
+    context: AppContext,
+) -> None:
+    provider = FakeProvider()
+    provider.prices["AAA"] = Decimal("50.25")
+    service = make_service(context, [provider])
+
+    async with context.db.session() as session:
+        instruments, report = await service.sync(session, AssetClass.STOCK)
+
+    assert [i.symbol for i in instruments] == ["AAA"]
+    assert report.bars_written > 0
+    assert report.quotes_updated == 1
+    assert instruments[0].last_quote_price == Decimal("50.25")
+
+
+async def test_the_unified_sync_tracks_named_symbols_outside_the_listing(
+    context: AppContext,
+) -> None:
+    provider = FakeProvider()
+    provider.prices["ZZZ"] = Decimal("7")
+    service = make_service(context, [provider])
+
+    async with context.db.session() as session:
+        instruments, report = await service.sync(session, AssetClass.STOCK, symbols=["zzz"])
+
+    assert [i.symbol for i in instruments] == ["ZZZ"]
+    assert report.quotes_updated == 1

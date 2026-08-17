@@ -198,7 +198,7 @@ async def test_the_schedule_is_empty_when_the_scheduler_is_disabled(
     assert response.json() == []
 
 
-async def test_the_scheduler_lists_the_bar_refresh_alongside_the_cycles(
+async def test_the_scheduler_lists_the_market_refresh_alongside_the_cycles(
     context: AppContext,
 ) -> None:
     """A job id the cron lookup did not know about used to raise rather than list."""
@@ -211,8 +211,8 @@ async def test_the_scheduler_lists_the_bar_refresh_alongside_the_cycles(
     finally:
         scheduler.shutdown()
 
-    assert "market:bars" in jobs
-    assert jobs["market:bars"]["cron"]
+    assert "market:refresh" in jobs
+    assert jobs["market:refresh"]["cron"]
     assert all(job["cron"] for job in jobs.values())
 
 

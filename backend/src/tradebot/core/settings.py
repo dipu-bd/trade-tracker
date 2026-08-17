@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     log_json: bool = True
 
     scheduler_enabled: bool = True
+    market_refresh_minutes: int = Field(default=15, ge=1, le=1440)
 
     @field_validator("cors_origins", mode="before")
     @classmethod

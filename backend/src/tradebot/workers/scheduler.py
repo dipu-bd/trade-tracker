@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from tradebot.context import AppContext
 from tradebot.core.logging import get_logger
@@ -27,7 +28,7 @@ CADENCES = (
 
 BY_NAME = {cadence.name: cadence for cadence in CADENCES}
 
-BAR_REFRESH_CRON = "30 20 * * mon-fri"
+MARKET_REFRESH_JOB = "market:refresh"
 
 
 class EngineScheduler:
@@ -59,12 +60,13 @@ class EngineScheduler:
                 coalesce=True,
             )
 
-        # Ahead of the earliest cycle, so a decision reads bars from the session that just closed
-        # rather than the one before it.
+        # An interval rather than a cron: prices go stale continuously, and the interval also
+        # fires shortly before every cycle, so a decision reads the session that just closed.
+        minutes = self._context.settings.market_refresh_minutes
         self._scheduler.add_job(
             self._refresher.refresh_all,
-            CronTrigger.from_crontab(BAR_REFRESH_CRON, timezone="UTC"),
-            id="market:bars",
+            IntervalTrigger(minutes=minutes),
+            id=MARKET_REFRESH_JOB,
             replace_existing=True,
             max_instances=1,
             coalesce=True,
@@ -90,4 +92,6 @@ class EngineScheduler:
         kind, _, name = job_id.partition(":")
         if kind == "cycle" and name in BY_NAME:
             return BY_NAME[name].cron
-        return BAR_REFRESH_CRON if job_id == "market:bars" else None
+        if job_id == MARKET_REFRESH_JOB:
+            return f"every {self._context.settings.market_refresh_minutes}m"
+        return None

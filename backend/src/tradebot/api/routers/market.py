@@ -4,6 +4,7 @@ from sqlalchemy import select
 from tradebot.api.deps import Context, CurrentUser, DbSession
 from tradebot.core.errors import NotFoundError, ValidationError
 from tradebot.db.models import Instrument
+from tradebot.marketdata.refresh import MarketDataRefresher
 from tradebot.marketdata.service import MarketDataService
 from tradebot.providers.base import AssetClass
 from tradebot.schemas.market import (
@@ -13,7 +14,6 @@ from tradebot.schemas.market import (
     QuoteOut,
     SyncRequest,
     SyncResultOut,
-    TrackRequest,
 )
 
 router = APIRouter(prefix="/market", tags=["market"])
@@ -146,59 +146,52 @@ async def providers(
 async def sync(
     body: SyncRequest, user: CurrentUser, context: Context, session: DbSession
 ) -> SyncResultOut:
-    """Refresh the tracked universe for one asset class, optionally pulling bars too."""
+    """Populate the store: universe, daily bars and last price, in one call.
+
+    Naming symbols pulls exactly those — a provider's listing is ranked (most-actives and
+    similar), so anything outside it was previously unreachable.
+    """
     asset_class = _asset_class(body.asset_class)
     service = await _service(context, session, user.id)
 
-    instruments = await service.sync_universe(session, asset_class, limit=body.limit)
-    report = await service.refresh_bars(session, instruments) if body.refresh_bars else None
+    instruments, report = await service.sync(
+        session,
+        asset_class,
+        symbols=body.symbols,
+        limit=body.limit,
+        with_bars=body.refresh_bars,
+        with_quotes=body.refresh_quotes,
+    )
 
     await context.events.record(
         session,
         domain="market",
         kind="universe_synced",
         user_id=user.id,
-        message=asset_class.value,
-        payload={"instruments": len(instruments)},
-    )
-
-    return SyncResultOut(
-        asset_class=asset_class.value,
-        instruments=len(instruments),
-        bars_written=report.bars_written if report else 0,
-        skipped_fresh=report.skipped_fresh if report else 0,
-        failed=report.failed if report else [],
-        gaps=report.gaps if report else {},
-    )
-
-
-@router.post("/track", response_model=SyncResultOut)
-async def track(
-    body: TrackRequest, user: CurrentUser, context: Context, session: DbSession
-) -> SyncResultOut:
-    """Track named symbols and pull their history.
-
-    Separate from `/sync` because that walks a provider's ranked listing — most-actives and
-    similar — so any name outside it was previously unreachable.
-    """
-    asset_class = _asset_class(body.asset_class)
-    service = await _service(context, session, user.id)
-
-    instruments, report = await service.track_symbols(session, body.symbols, asset_class)
-
-    await context.events.record(
-        session,
-        domain="market",
-        kind="symbols_tracked",
-        user_id=user.id,
-        message=", ".join(item.symbol for item in instruments) or "none",
-        payload={"tracked": len(instruments), "failed": report.failed},
+        message=", ".join(item.symbol for item in instruments) or asset_class.value,
+        payload={"instruments": len(instruments), "failed": report.failed},
     )
 
     return SyncResultOut(
         asset_class=asset_class.value,
         instruments=len(instruments),
         bars_written=report.bars_written,
+        quotes_updated=report.quotes_updated,
+        skipped_fresh=report.skipped_fresh,
+        failed=report.failed,
+        gaps=report.gaps,
+    )
+
+
+@router.post("/refresh", response_model=SyncResultOut)
+async def refresh(user: CurrentUser, context: Context) -> SyncResultOut:
+    """Run the periodic refresh now, over every tracked instrument, for every owner."""
+    report = await MarketDataRefresher(context).refresh_all()
+    return SyncResultOut(
+        asset_class="all",
+        instruments=report.instruments,
+        bars_written=report.bars_written,
+        quotes_updated=report.quotes_updated,
         skipped_fresh=report.skipped_fresh,
         failed=report.failed,
         gaps=report.gaps,

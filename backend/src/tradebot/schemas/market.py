@@ -61,22 +61,21 @@ class ProviderStatusOut(BaseModel):
 
 
 class SyncRequest(BaseModel):
-    asset_class: str
+    """One request for the whole store. Name symbols to pull exactly those; name none to walk
+    the provider's ranked listing instead."""
+
+    asset_class: str = "stock"
+    symbols: list[str] = Field(default_factory=list, max_length=50)
     limit: int = 200
-    refresh_bars: bool = False
+    refresh_bars: bool = True
+    refresh_quotes: bool = True
 
 
 class SyncResultOut(BaseModel):
     asset_class: str
     instruments: int
     bars_written: int
-    skipped_fresh: int
-    failed: list[str]
-    gaps: dict[str, int]
-
-
-class TrackRequest(BaseModel):
-    """Explicit symbols to start tracking, rather than a provider's ranked listing."""
-
-    symbols: list[str] = Field(min_length=1, max_length=50)
-    asset_class: str = "stock"
+    quotes_updated: int = 0
+    skipped_fresh: int = 0
+    failed: list[str] = Field(default_factory=list)
+    gaps: dict[str, int] = Field(default_factory=dict)
