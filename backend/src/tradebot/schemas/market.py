@@ -62,20 +62,26 @@ class ProviderStatusOut(BaseModel):
 
 class SyncRequest(BaseModel):
     """One request for the whole store. Name symbols to pull exactly those; name none to walk
-    the provider's ranked listing instead."""
+    each asset class's ranked listing instead."""
 
-    asset_class: str = "stock"
-    symbols: list[str] = Field(default_factory=list, max_length=50)
-    limit: int = 200
-    refresh_bars: bool = True
-    refresh_quotes: bool = True
+    asset_classes: list[str] = Field(default_factory=list, max_length=8)
+    symbols: list[str] = Field(default_factory=list, max_length=200)
+    limit: int = Field(default=200, ge=1, le=5000)
 
 
-class SyncResultOut(BaseModel):
-    asset_class: str
+class SyncStatusOut(BaseModel):
+    """Progress of the running or last-finished pass."""
+
+    label: str
+    running: bool
+    started_at: str | None
+    finished_at: str | None
+    done: int
+    total: int
+    current: str
+    error: str | None
     instruments: int
     bars_written: int
-    quotes_updated: int = 0
-    skipped_fresh: int = 0
-    failed: list[str] = Field(default_factory=list)
-    gaps: dict[str, int] = Field(default_factory=dict)
+    quotes_updated: int
+    skipped_fresh: int
+    failed: list[str]

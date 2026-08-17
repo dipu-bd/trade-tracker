@@ -40,6 +40,10 @@ class Settings(BaseSettings):
 
     scheduler_enabled: bool = True
     market_refresh_minutes: int = Field(default=15, ge=1, le=1440)
+    market_universe_limit: int = Field(default=200, ge=1, le=5000)
+    # The scheduled pass re-walks the provider listings, so the tradable universe drifts on its
+    # own. Turn this off to make adding a name a deliberate act again.
+    market_discovery_enabled: bool = True
 
     @field_validator("cors_origins", mode="before")
     @classmethod

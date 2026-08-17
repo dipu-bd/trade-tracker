@@ -219,9 +219,9 @@ async def test_the_scheduler_lists_the_market_refresh_alongside_the_cycles(
 async def test_the_bar_refresh_adds_no_instruments_when_none_are_tracked(
     context: AppContext,
 ) -> None:
-    from tradebot.marketdata.refresh import MarketDataRefresher
+    from tradebot.marketdata.refresh import MarketSync
 
-    report = await MarketDataRefresher(context).refresh_all()
+    report = await MarketSync(context).refresh_all()
 
     assert report.instruments == 0
     assert report.bars_written == 0

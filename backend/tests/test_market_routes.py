@@ -163,14 +163,14 @@ async def test_sync_rejects_an_unknown_asset_class(
     client: AsyncClient, registered: dict[str, str]
 ) -> None:
     response = await client.post(
-        "/api/market/sync", json={"asset_class": "bonds"}, headers=registered
+        "/api/market/sync", json={"asset_classes": ["bonds"]}, headers=registered
     )
 
     assert response.status_code == 422
 
 
 async def test_sync_requires_authentication(client: AsyncClient) -> None:
-    response = await client.post("/api/market/sync", json={"asset_class": "crypto"})
+    response = await client.post("/api/market/sync", json={"asset_classes": ["crypto"]})
 
     assert response.status_code == 401
 
@@ -184,3 +184,44 @@ async def test_instruments_are_visible_to_any_authenticated_user(
 
     response = await client.get("/api/market/instruments", headers=registered)
     assert len(response.json()) == count
+
+
+async def test_sync_returns_immediately_and_reports_progress(
+    client: AsyncClient, registered: dict[str, str], context: AppContext
+) -> None:
+    """The pass is minutes of provider calls, so the request must not wait for it."""
+    started = await client.post(
+        "/api/market/sync", json={"asset_classes": ["etf", "stock"]}, headers=registered
+    )
+    assert started.status_code == 200
+    assert started.json()["running"] is True
+
+    await context.sync_job.wait()
+
+    status = await client.get("/api/market/sync", headers=registered)
+    assert status.status_code == 200
+    assert status.json()["running"] is False
+
+
+async def test_a_second_sync_is_refused_while_one_is_running(
+    client: AsyncClient, registered: dict[str, str], context: AppContext
+) -> None:
+    await client.post("/api/market/sync", json={"asset_classes": ["etf"]}, headers=registered)
+    second = await client.post(
+        "/api/market/sync", json={"asset_classes": ["etf"]}, headers=registered
+    )
+    await context.sync_job.wait()
+
+    assert second.status_code == 409
+
+
+async def test_one_failing_asset_class_does_not_cost_the_others(context: AppContext) -> None:
+    """A listing that 402s used to raise a 500 that took every other sleeve with it."""
+    from tradebot.marketdata.refresh import MarketSync
+    from tradebot.providers.base import AssetClass
+
+    report = await MarketSync(context).discover(
+        1, asset_classes=[AssetClass.STOCK, AssetClass.ETF], limit=5
+    )
+
+    assert len(report.failed) == 2

@@ -4,6 +4,7 @@ from tradebot.core.clock import Clock, LiveClock
 from tradebot.core.crypto import SecretBox
 from tradebot.core.settings import Settings
 from tradebot.db.session import Database
+from tradebot.marketdata.jobs import MarketSyncJob
 from tradebot.obs import EventBus, EventRecorder
 from tradebot.services import AuthService, CredentialVault
 from tradebot.services.providers import ProviderService
@@ -19,6 +20,7 @@ class AppContext:
     auth: AuthService
     vault: CredentialVault
     providers: ProviderService
+    sync_job: MarketSyncJob
 
     @classmethod
     def build(cls, settings: Settings, *, clock: Clock | None = None) -> "AppContext":
@@ -34,6 +36,7 @@ class AppContext:
             auth=AuthService(settings),
             vault=vault,
             providers=ProviderService(vault, clock=clock),
+            sync_job=MarketSyncJob(clock=clock),
         )
 
     async def aclose(self) -> None:

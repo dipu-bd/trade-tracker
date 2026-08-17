@@ -16,6 +16,7 @@ from tradebot.core.logging import configure_logging, get_logger
 from tradebot.core.settings import Settings, get_settings
 from tradebot.obs import metrics
 from tradebot.obs.slack import SlackNotifier, WebhookLookup
+from tradebot.providers.base import ProviderError
 from tradebot.workers.scheduler import EngineScheduler
 
 _log = get_logger(__name__)
@@ -95,6 +96,15 @@ def _register_error_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=exc.status_code,
             content={"error": {"code": exc.code, "message": exc.message}},
+        )
+
+    @app.exception_handler(ProviderError)
+    async def handle_provider_error(_request: Request, exc: ProviderError) -> JSONResponse:
+        # An upstream that is down is not an internal error, and a 500 hides which provider it
+        # was behind a stack trace nobody reads.
+        return JSONResponse(
+            status_code=503,
+            content={"error": {"code": "provider_unavailable", "message": str(exc)}},
         )
 
     @app.exception_handler(RequestValidationError)

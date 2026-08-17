@@ -2,10 +2,11 @@ from fastapi import APIRouter, Query
 from sqlalchemy import select
 
 from tradebot.api.deps import Context, CurrentUser, DbSession
-from tradebot.core.errors import NotFoundError, ValidationError
+from tradebot.core.errors import ConflictError, NotFoundError, ValidationError
 from tradebot.db.models import Instrument
-from tradebot.marketdata.refresh import MarketDataRefresher
-from tradebot.marketdata.service import MarketDataService
+from tradebot.marketdata.jobs import ProgressFn
+from tradebot.marketdata.refresh import DISCOVERABLE, MarketSync
+from tradebot.marketdata.service import IngestReport, MarketDataService
 from tradebot.providers.base import AssetClass
 from tradebot.schemas.market import (
     BarOut,
@@ -13,7 +14,7 @@ from tradebot.schemas.market import (
     ProviderStatusOut,
     QuoteOut,
     SyncRequest,
-    SyncResultOut,
+    SyncStatusOut,
 )
 
 router = APIRouter(prefix="/market", tags=["market"])
@@ -142,57 +143,56 @@ async def providers(
     return out
 
 
-@router.post("/sync", response_model=SyncResultOut)
+@router.post("/sync", response_model=SyncStatusOut)
 async def sync(
     body: SyncRequest, user: CurrentUser, context: Context, session: DbSession
-) -> SyncResultOut:
-    """Populate the store: universe, daily bars and last price, in one call.
+) -> SyncStatusOut:
+    """Start a sync over every named asset class: universe, daily bars and last price.
 
-    Naming symbols pulls exactly those — a provider's listing is ranked (most-actives and
-    similar), so anything outside it was previously unreachable.
+    A full pass is thousands of sequential provider calls, so it runs in the background and this
+    returns immediately — poll `GET /market/sync` for progress. Naming symbols pulls exactly
+    those; a provider's listing is ranked (most-actives and similar), so anything outside it is
+    only reachable by name.
     """
-    asset_class = _asset_class(body.asset_class)
-    service = await _service(context, session, user.id)
+    classes = [_asset_class(name) for name in body.asset_classes] or list(DISCOVERABLE)
+    runner = MarketSync(context)
 
-    instruments, report = await service.sync(
-        session,
-        asset_class,
-        symbols=body.symbols,
-        limit=body.limit,
-        with_bars=body.refresh_bars,
-        with_quotes=body.refresh_quotes,
-    )
+    async def run(progress: ProgressFn) -> IngestReport:
+        return await runner.discover(
+            user.id,
+            asset_classes=classes,
+            symbols=body.symbols,
+            limit=body.limit,
+            progress=progress,
+        )
+
+    if not context.sync_job.start(", ".join(c.value for c in classes), run):
+        raise ConflictError("a market sync is already running")
 
     await context.events.record(
         session,
         domain="market",
         kind="universe_synced",
         user_id=user.id,
-        message=", ".join(item.symbol for item in instruments) or asset_class.value,
-        payload={"instruments": len(instruments), "failed": report.failed},
+        message=", ".join(body.symbols) or ", ".join(c.value for c in classes),
     )
-
-    return SyncResultOut(
-        asset_class=asset_class.value,
-        instruments=len(instruments),
-        bars_written=report.bars_written,
-        quotes_updated=report.quotes_updated,
-        skipped_fresh=report.skipped_fresh,
-        failed=report.failed,
-        gaps=report.gaps,
-    )
+    return SyncStatusOut.model_validate(context.sync_job.snapshot())
 
 
-@router.post("/refresh", response_model=SyncResultOut)
-async def refresh(user: CurrentUser, context: Context) -> SyncResultOut:
-    """Run the periodic refresh now, over every tracked instrument, for every owner."""
-    report = await MarketDataRefresher(context).refresh_all()
-    return SyncResultOut(
-        asset_class="all",
-        instruments=report.instruments,
-        bars_written=report.bars_written,
-        quotes_updated=report.quotes_updated,
-        skipped_fresh=report.skipped_fresh,
-        failed=report.failed,
-        gaps=report.gaps,
-    )
+@router.post("/refresh", response_model=SyncStatusOut)
+async def refresh(user: CurrentUser, context: Context) -> SyncStatusOut:
+    """Start the periodic pass now: bars and prices for everything already tracked."""
+    runner = MarketSync(context)
+
+    async def run(progress: ProgressFn) -> IngestReport:
+        return await runner.refresh_all(progress=progress)
+
+    if not context.sync_job.start("refresh", run):
+        raise ConflictError("a market sync is already running")
+    return SyncStatusOut.model_validate(context.sync_job.snapshot())
+
+
+@router.get("/sync", response_model=SyncStatusOut)
+async def sync_status(user: CurrentUser, context: Context) -> SyncStatusOut:
+    """Progress of the running or last-finished pass."""
+    return SyncStatusOut.model_validate(context.sync_job.snapshot())

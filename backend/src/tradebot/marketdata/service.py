@@ -1,4 +1,4 @@
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
@@ -26,6 +26,16 @@ _log = get_logger(__name__)
 
 DEFAULT_HISTORY_DAYS = 260
 MAX_STALE_DAYS = 1
+
+# SQLite caps bound parameters per statement, so a thousand-symbol universe cannot be looked
+# up in one IN clause.
+LOOKUP_CHUNK = 400
+
+ProgressFn = Callable[[str, int, int], None]
+
+
+def _noop(current: str, done: int, total: int) -> None:
+    return None
 
 
 @dataclass
@@ -84,12 +94,14 @@ class MarketDataService:
             return []
 
         symbols = [entry.symbol for entry in entries]
-        existing = {
-            (row.symbol, row.asset_class): row
-            for row in await session.scalars(
-                select(Instrument).where(Instrument.symbol.in_(symbols))
+        existing: dict[tuple[str, str], Instrument] = {}
+        for start in range(0, len(symbols), LOOKUP_CHUNK):
+            rows = await session.scalars(
+                select(Instrument).where(
+                    Instrument.symbol.in_(symbols[start : start + LOOKUP_CHUNK])
+                )
             )
-        }
+            existing.update({(row.symbol, row.asset_class): row for row in rows})
 
         instruments: list[Instrument] = []
         for entry in entries:
@@ -115,10 +127,12 @@ class MarketDataService:
         *,
         days: int = DEFAULT_HISTORY_DAYS,
         force: bool = False,
+        progress: ProgressFn = _noop,
     ) -> IngestReport:
         report = IngestReport(instruments=len(instruments))
 
-        for instrument in instruments:
+        for index, instrument in enumerate(instruments):
+            progress(instrument.symbol, index, len(instruments))
             if not force and not self._is_stale(instrument):
                 report.skipped_fresh += 1
                 continue
@@ -158,6 +172,7 @@ class MarketDataService:
                     payload={"missing_sessions": missing},
                 )
 
+        progress("", len(instruments), len(instruments))
         return report
 
     async def sync(
@@ -170,6 +185,7 @@ class MarketDataService:
         days: int = DEFAULT_HISTORY_DAYS,
         with_bars: bool = True,
         with_quotes: bool = True,
+        progress: ProgressFn = _noop,
     ) -> tuple[list[Instrument], IngestReport]:
         """One path for everything that populates the store: universe, bars and prices.
 
@@ -178,12 +194,12 @@ class MarketDataService:
         """
         if symbols:
             instruments, report = await self._track_symbols(
-                session, symbols, asset_class, days=days, with_bars=with_bars
+                session, symbols, asset_class, days=days, with_bars=with_bars, progress=progress
             )
         else:
             instruments = await self.sync_universe(session, asset_class, limit=limit)
             report = (
-                await self.refresh_bars(session, instruments, days=days)
+                await self.refresh_bars(session, instruments, days=days, progress=progress)
                 if with_bars
                 else IngestReport(instruments=len(instruments))
             )
@@ -205,6 +221,7 @@ class MarketDataService:
         *,
         days: int = DEFAULT_HISTORY_DAYS,
         with_bars: bool = True,
+        progress: ProgressFn = _noop,
     ) -> tuple[list[Instrument], IngestReport]:
         """Track named symbols directly, rather than whatever a provider's listing returns.
 
@@ -222,7 +239,9 @@ class MarketDataService:
         instruments = await self.upsert_instruments(session, entries)
         if not with_bars:
             return instruments, IngestReport(instruments=len(instruments))
-        report = await self.refresh_bars(session, instruments, days=days, force=True)
+        report = await self.refresh_bars(
+            session, instruments, days=days, force=True, progress=progress
+        )
 
         kept: list[Instrument] = []
         for instrument in instruments:
@@ -321,29 +340,35 @@ class MarketDataService:
 
         quotes: dict[str, Quote] = {}
         for asset_class, group in by_class.items():
-            symbols = [row.symbol for row in group]
+            # Chunked so a failure costs one batch rather than the whole sleeve; a provider
+            # without a batch quote endpoint turns each of these into one request per symbol.
+            for start in range(0, len(group), LOOKUP_CHUNK):
+                batch = group[start : start + LOOKUP_CHUNK]
+                symbols = [row.symbol for row in batch]
 
-            async def call(provider: Provider, wanted: list[str] = symbols) -> dict[str, Quote]:
-                found: dict[str, Quote] = await provider.get_quotes(wanted)  # type: ignore[attr-defined]
-                return found
+                async def call(provider: Provider, wanted: list[str] = symbols) -> dict[str, Quote]:
+                    found: dict[str, Quote] = await provider.get_quotes(wanted)  # type: ignore[attr-defined]
+                    return found
 
-            try:
-                fetched = await self._router.execute(
-                    Capability.QUOTES, call, asset_class=asset_class
-                )
-            except ProviderUnavailableError as exc:
-                _log.warning("quote_fetch_failed", asset_class=asset_class.value, error=str(exc))
-                await self._events.record(
-                    session,
-                    domain="market",
-                    kind="quote_fetch_failed",
-                    severity="warning",
-                    message=asset_class.value,
-                )
-                continue
+                try:
+                    fetched = await self._router.execute(
+                        Capability.QUOTES, call, asset_class=asset_class
+                    )
+                except ProviderUnavailableError as exc:
+                    _log.warning(
+                        "quote_fetch_failed", asset_class=asset_class.value, error=str(exc)
+                    )
+                    await self._events.record(
+                        session,
+                        domain="market",
+                        kind="quote_fetch_failed",
+                        severity="warning",
+                        message=asset_class.value,
+                    )
+                    continue
 
-            quotes.update(fetched)
-            await self._mark_quotes(group, fetched)
+                quotes.update(fetched)
+                await self._mark_quotes(batch, fetched)
 
         return quotes
 

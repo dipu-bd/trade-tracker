@@ -255,14 +255,20 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Sync Status
+         * @description Progress of the running or last-finished pass.
+         */
+        get: operations["sync_status_api_market_sync_get"];
         put?: never;
         /**
          * Sync
-         * @description Populate the store: universe, daily bars and last price, in one call.
+         * @description Start a sync over every named asset class: universe, daily bars and last price.
          *
-         *     Naming symbols pulls exactly those — a provider's listing is ranked (most-actives and
-         *     similar), so anything outside it was previously unreachable.
+         *     A full pass is thousands of sequential provider calls, so it runs in the background and this
+         *     returns immediately — poll `GET /market/sync` for progress. Naming symbols pulls exactly
+         *     those; a provider's listing is ranked (most-actives and similar), so anything outside it is
+         *     only reachable by name.
          */
         post: operations["sync_api_market_sync_post"];
         delete?: never;
@@ -282,7 +288,7 @@ export interface paths {
         put?: never;
         /**
          * Refresh
-         * @description Run the periodic refresh now, over every tracked instrument, for every owner.
+         * @description Start the periodic pass now: bars and prices for everything already tracked.
          */
         post: operations["refresh_api_market_refresh_post"];
         delete?: never;
@@ -2131,14 +2137,11 @@ export interface components {
         /**
          * SyncRequest
          * @description One request for the whole store. Name symbols to pull exactly those; name none to walk
-         *     the provider's ranked listing instead.
+         *     each asset class's ranked listing instead.
          */
         SyncRequest: {
-            /**
-             * Asset Class
-             * @default stock
-             */
-            asset_class: string;
+            /** Asset Classes */
+            asset_classes?: string[];
             /** Symbols */
             symbols?: string[];
             /**
@@ -2146,41 +2149,38 @@ export interface components {
              * @default 200
              */
             limit: number;
-            /**
-             * Refresh Bars
-             * @default true
-             */
-            refresh_bars: boolean;
-            /**
-             * Refresh Quotes
-             * @default true
-             */
-            refresh_quotes: boolean;
         };
-        /** SyncResultOut */
-        SyncResultOut: {
-            /** Asset Class */
-            asset_class: string;
+        /**
+         * SyncStatusOut
+         * @description Progress of the running or last-finished pass.
+         */
+        SyncStatusOut: {
+            /** Label */
+            label: string;
+            /** Running */
+            running: boolean;
+            /** Started At */
+            started_at: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /** Done */
+            done: number;
+            /** Total */
+            total: number;
+            /** Current */
+            current: string;
+            /** Error */
+            error: string | null;
             /** Instruments */
             instruments: number;
             /** Bars Written */
             bars_written: number;
-            /**
-             * Quotes Updated
-             * @default 0
-             */
+            /** Quotes Updated */
             quotes_updated: number;
-            /**
-             * Skipped Fresh
-             * @default 0
-             */
+            /** Skipped Fresh */
             skipped_fresh: number;
             /** Failed */
-            failed?: string[];
-            /** Gaps */
-            gaps?: {
-                [key: string]: number;
-            };
+            failed: string[];
         };
         /** TokenResponse */
         TokenResponse: {
@@ -2593,6 +2593,26 @@ export interface operations {
             };
         };
     };
+    sync_status_api_market_sync_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyncStatusOut"];
+                };
+            };
+        };
+    };
     sync_api_market_sync_post: {
         parameters: {
             query?: never;
@@ -2612,7 +2632,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SyncResultOut"];
+                    "application/json": components["schemas"]["SyncStatusOut"];
                 };
             };
             /** @description Validation Error */
@@ -2641,7 +2661,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SyncResultOut"];
+                    "application/json": components["schemas"]["SyncStatusOut"];
                 };
             };
         };

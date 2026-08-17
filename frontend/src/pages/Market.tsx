@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createChart, type IChartApi } from 'lightweight-charts'
 import { useEffect, useRef, useState } from 'react'
 
@@ -7,67 +7,117 @@ import { useBars, useInstruments } from '@/api/hooks'
 import { Button, Card, Cell, Empty, Field, Row, Table, inputClass } from '@/components/ui'
 import { ago, money, num } from '@/lib/format'
 
-interface SyncResult {
-  asset_class: string
+interface SyncStatus {
+  label: string
+  running: boolean
+  done: number
+  total: number
+  current: string
+  error: string | null
   instruments: number
-  bars_written: number | null
-  quotes_updated: number | null
+  bars_written: number
+  quotes_updated: number
+  skipped_fresh: number
   failed: string[]
 }
 
-function Outcome({ result }: { result: SyncResult }) {
+const ASSET_CLASSES = ['etf', 'stock', 'crypto', 'commodity']
+
+function Progress({ status }: { status: SyncStatus }) {
+  const pct = status.total > 0 ? Math.round((status.done / status.total) * 100) : 0
   return (
-    <p className="mt-3 text-sm">
-      {result.instruments} instruments, {result.bars_written ?? 0} bars,{' '}
-      {result.quotes_updated ?? 0} prices.
-      {result.failed.length > 0 && (
-        <span className="text-[var(--color-loss)]"> No history for: {result.failed.join(', ')}</span>
+    <div className="mt-3">
+      {status.running && (
+        <>
+          <div className="h-1.5 w-full overflow-hidden rounded bg-[var(--color-border-subtle)]">
+            <div className="h-full bg-[var(--color-accent)]" style={{ width: `${pct}%` }} />
+          </div>
+          <p className="mt-2 text-sm text-[var(--color-ink-muted)]">
+            {status.label} — {status.current || 'starting'} ({status.done}/{status.total})
+          </p>
+        </>
       )}
-    </p>
+      <p className="mt-2 text-sm">
+        {status.instruments} instruments, {status.bars_written} bars, {status.quotes_updated}{' '}
+        prices, {status.skipped_fresh} already fresh.
+        {status.failed.length > 0 && (
+          <span className="text-[var(--color-loss)]"> Failed: {status.failed.join('; ')}</span>
+        )}
+      </p>
+      {status.error && <p className="mt-2 text-sm text-[var(--color-loss)]">{status.error}</p>}
+    </div>
   )
 }
 
 function SyncPanel() {
   const client = useQueryClient()
-  const [assetClass, setAssetClass] = useState('etf')
-  const [limit, setLimit] = useState(50)
+  const [classes, setClasses] = useState<string[]>(ASSET_CLASSES)
+  const [limit, setLimit] = useState(200)
   const [symbols, setSymbols] = useState('')
 
-  const invalidate = () => void client.invalidateQueries({ queryKey: ['instruments'] })
+  const status = useQuery({
+    queryKey: ['market-sync'],
+    queryFn: () => api<SyncStatus>('/market/sync'),
+    refetchInterval: (query) => (query.state.data?.running ? 1000 : false),
+  })
 
-  const sync = useMutation({
-    mutationFn: () =>
-      api<SyncResult>('/market/sync', {
+  useEffect(() => {
+    if (status.data && !status.data.running) {
+      void client.invalidateQueries({ queryKey: ['instruments'] })
+    }
+  }, [client, status.data?.running])
+
+  const start = useMutation({
+    mutationFn: (path: string) =>
+      api<SyncStatus>(path, {
         method: 'POST',
-        body: JSON.stringify({
-          asset_class: assetClass,
-          limit,
-          symbols: symbols
-            .split(/[,\s]+/)
-            .map((item) => item.trim().toUpperCase())
-            .filter(Boolean),
-        }),
+        body:
+          path === '/market/sync'
+            ? JSON.stringify({
+                asset_classes: classes,
+                limit,
+                symbols: symbols
+                  .split(/[,\s]+/)
+                  .map((item) => item.trim().toUpperCase())
+                  .filter(Boolean),
+              })
+            : undefined,
       }),
-    onSuccess: invalidate,
+    onSuccess: (data) => client.setQueryData(['market-sync'], data),
   })
 
-  const refresh = useMutation({
-    mutationFn: () => api<SyncResult>('/market/refresh', { method: 'POST' }),
-    onSuccess: invalidate,
-  })
+  const running = status.data?.running ?? false
+  const toggle = (name: string) =>
+    setClasses((current) =>
+      current.includes(name) ? current.filter((item) => item !== name) : [...current, name],
+    )
 
   return (
     <Card title="Market sync">
       <p className="mb-3 text-sm text-[var(--color-ink-muted)]">
-        One pass over the universe, the daily bars and the last price. The engine only ever
-        considers instruments it already tracks with stored bars — nothing is discovered
-        automatically. Leave the symbol box empty to walk the provider&rsquo;s ranked listing
-        (most-actives and similar), or name symbols to pull exactly those: anything outside that
-        listing — SPGI, say — is only reachable by name. A name needs about 260 sessions of
-        history before the momentum rank and the 200-day filter are defined. After this, a
-        background job keeps bars and prices current on its own.
+        One pass over every asset class you tick: the universe, the daily bars and the last price.
+        A full pass is thousands of provider calls, so it runs in the background and reports
+        progress here — closing this page does not stop it. Leave the symbol box empty to walk
+        each class&rsquo;s ranked listing (most-actives and similar), or name symbols to pull
+        exactly those: anything outside those listings — SPGI, say — is only reachable by name. A
+        name needs about 260 sessions of history before the momentum rank and the 200-day filter
+        are defined. A background job repeats this on its own schedule.
       </p>
-      <div className="grid items-end gap-3 sm:grid-cols-4">
+
+      <div className="mb-3 flex flex-wrap gap-3">
+        {ASSET_CLASSES.map((name) => (
+          <label key={name} className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={classes.includes(name)}
+              onChange={() => toggle(name)}
+            />
+            {name}
+          </label>
+        ))}
+      </div>
+
+      <div className="grid items-end gap-3 sm:grid-cols-3">
         <div className="sm:col-span-2">
           <Field label="Symbols (blank for the provider listing)">
             <input
@@ -78,23 +128,11 @@ function SyncPanel() {
             />
           </Field>
         </div>
-        <Field label="Asset class">
-          <select
-            className={inputClass}
-            value={assetClass}
-            onChange={(event) => setAssetClass(event.target.value)}
-          >
-            <option value="etf">etf</option>
-            <option value="stock">stock</option>
-            <option value="crypto">crypto</option>
-            <option value="commodity">commodity</option>
-          </select>
-        </Field>
-        <Field label="Max symbols (listing only)">
+        <Field label="Max symbols per class (listing only)">
           <input
             type="number"
             min={1}
-            max={500}
+            max={5000}
             className={inputClass}
             value={limit}
             onChange={(event) => setLimit(Number(event.target.value))}
@@ -103,22 +141,22 @@ function SyncPanel() {
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-3">
-        <Button variant="primary" disabled={sync.isPending} onClick={() => sync.mutate()}>
-          {sync.isPending ? 'Syncing…' : 'Sync now'}
+        <Button
+          variant="primary"
+          disabled={running || classes.length === 0}
+          onClick={() => start.mutate('/market/sync')}
+        >
+          {running ? 'Syncing…' : 'Sync now'}
         </Button>
-        <Button disabled={refresh.isPending} onClick={() => refresh.mutate()}>
-          {refresh.isPending ? 'Refreshing…' : 'Refresh everything tracked'}
+        <Button disabled={running} onClick={() => start.mutate('/market/refresh')}>
+          Refresh everything tracked
         </Button>
       </div>
 
-      {sync.error && (
-        <p className="mt-3 text-sm text-[var(--color-loss)]">{(sync.error as Error).message}</p>
+      {start.error && (
+        <p className="mt-3 text-sm text-[var(--color-loss)]">{(start.error as Error).message}</p>
       )}
-      {sync.data && <Outcome result={sync.data} />}
-      {refresh.error && (
-        <p className="mt-3 text-sm text-[var(--color-loss)]">{(refresh.error as Error).message}</p>
-      )}
-      {refresh.data && <Outcome result={refresh.data} />}
+      {status.data && <Progress status={status.data} />}
     </Card>
   )
 }

@@ -7,7 +7,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from tradebot.context import AppContext
 from tradebot.core.logging import get_logger
 from tradebot.engine.runner import EngineRunner
-from tradebot.marketdata.refresh import MarketDataRefresher
+from tradebot.marketdata.refresh import MarketSync
 
 _log = get_logger(__name__)
 
@@ -41,7 +41,7 @@ class EngineScheduler:
     def __init__(self, context: AppContext) -> None:
         self._context = context
         self._runner = EngineRunner(context)
-        self._refresher = MarketDataRefresher(context)
+        self._sync = MarketSync(context)
         self._scheduler = AsyncIOScheduler(timezone="UTC")
 
     @property
@@ -64,7 +64,7 @@ class EngineScheduler:
         # fires shortly before every cycle, so a decision reads the session that just closed.
         minutes = self._context.settings.market_refresh_minutes
         self._scheduler.add_job(
-            self._refresher.refresh_all,
+            self._run_market_pass,
             IntervalTrigger(minutes=minutes),
             id=MARKET_REFRESH_JOB,
             replace_existing=True,
@@ -73,6 +73,11 @@ class EngineScheduler:
         )
         self._scheduler.start()
         _log.info("scheduler_started", cadences=[item.name for item in CADENCES])
+
+    async def _run_market_pass(self) -> None:
+        self._context.sync_job.start(
+            "scheduled", lambda progress: self._sync.scheduled(progress=progress)
+        )
 
     def shutdown(self) -> None:
         if self._scheduler.running:
