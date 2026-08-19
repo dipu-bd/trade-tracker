@@ -335,7 +335,14 @@ export interface paths {
         get: operations["get_portfolio_api_portfolios__portfolio_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Portfolio
+         * @description Erase a portfolio and its whole history: ledger, orders, fills, positions and cycles.
+         *
+         *     There is no undo and nothing is archived — a paper portfolio you no longer want is noise in
+         *     every list until it is gone.
+         */
+        delete: operations["delete_portfolio_api_portfolios__portfolio_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2738,6 +2745,35 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PortfolioDetail"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_portfolio_api_portfolios__portfolio_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

@@ -91,7 +91,7 @@ export function Button({
 }: {
   children: ReactNode
   onClick?: () => void
-  variant?: 'default' | 'primary' | 'ghost'
+  variant?: 'default' | 'primary' | 'ghost' | 'danger'
   disabled?: boolean
   type?: 'button' | 'submit'
 }) {
@@ -107,6 +107,8 @@ export function Button({
         variant === 'default' &&
           'border border-[var(--color-border-subtle)] hover:bg-[var(--color-surface-sunken)]',
         variant === 'ghost' && 'text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]',
+        variant === 'danger' &&
+          'border border-[color-mix(in_oklab,var(--color-loss)_40%,transparent)] text-[var(--color-loss)] hover:bg-[color-mix(in_oklab,var(--color-loss)_12%,transparent)]',
       )}
     >
       {children}
