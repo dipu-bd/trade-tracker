@@ -280,12 +280,14 @@ function NotificationsCard({ portfolioId }: { portfolioId: number }) {
         <div className="sm:col-span-2">
           <Field label="Incoming webhook URL">
             <input
-              type="password"
+              type="url"
+              inputMode="url"
               className={inputClass}
               value={url}
               onChange={(event) => setUrl(event.target.value)}
               placeholder="https://hooks.slack.com/services/..."
               autoComplete="off"
+              spellCheck={false}
             />
           </Field>
         </div>

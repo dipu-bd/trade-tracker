@@ -29,6 +29,22 @@ import type {
 
 const LIVE = { refetchInterval: 15_000 }
 
+/** Query keys shaped `[name, portfolioId]`, so they can be dropped when one is deleted. */
+const PORTFOLIO_SCOPED = [
+  'portfolio',
+  'positions',
+  'orders',
+  'fills',
+  'ledger',
+  'snapshots',
+  'strategy',
+  'cycles',
+  'aicalls',
+  'aispend',
+  'aisummary',
+  'lessons',
+]
+
 export function usePortfolios() {
   return useQuery({ queryKey: ['portfolios'], queryFn: () => api<Portfolio[]>('/portfolios') })
 }
@@ -205,6 +221,21 @@ export function useCreatePortfolio() {
     mutationFn: (body: { name: string; initial_capital: string; allow_fractional: boolean }) =>
       api<Portfolio>('/portfolios', { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: () => void client.invalidateQueries({ queryKey: ['portfolios'] }),
+  })
+}
+
+export function useDeletePortfolio() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => api<void>(`/portfolios/${id}`, { method: 'DELETE' }),
+    onSuccess: (_result, id) => {
+      // Dropping the per-portfolio caches rather than invalidating them: a refetch of a
+      // portfolio that no longer exists is a 404 rendered as an error, not an empty page.
+      for (const key of PORTFOLIO_SCOPED) {
+        client.removeQueries({ queryKey: [key, id] })
+      }
+      void client.invalidateQueries({ queryKey: ['portfolios'] })
+    },
   })
 }
 

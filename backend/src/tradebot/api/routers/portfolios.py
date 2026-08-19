@@ -99,6 +99,19 @@ async def get_portfolio(
     )
 
 
+@router.delete("/{portfolio_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_portfolio(
+    portfolio_id: int, user: CurrentUser, context: Context, session: DbSession
+) -> None:
+    """Erase a portfolio and its whole history: ledger, orders, fills, positions and cycles.
+
+    There is no undo and nothing is archived — a paper portfolio you no longer want is noise in
+    every list until it is gone.
+    """
+    portfolio = await load_portfolio(session, portfolio_id, user.id)
+    await _broker(context).delete_portfolio(session, portfolio)
+
+
 @router.post("/{portfolio_id}/orders", response_model=OrderOut, status_code=status.HTTP_201_CREATED)
 async def place_order(
     portfolio_id: int,

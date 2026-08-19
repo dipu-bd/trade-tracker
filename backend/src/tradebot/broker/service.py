@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tradebot.broker import lots as lot_math
@@ -16,6 +16,7 @@ from tradebot.core.errors import ConflictError, NotFoundError, ValidationError
 from tradebot.core.money import quantize_cash, quantize_price, quantize_qty
 from tradebot.db.models import (
     EntryType,
+    Event,
     Fill,
     Instrument,
     Lot,
@@ -99,6 +100,31 @@ class BrokerService:
             memo="initial capital",
         )
         return portfolio
+
+    async def delete_portfolio(self, session: AsyncSession, portfolio: Portfolio) -> None:
+        """Erase a portfolio and everything projected from it.
+
+        Ledger, orders, fills, positions, lots, snapshots, decision runs, AI calls and lessons
+        all hang off the portfolio by a cascading foreign key, so one delete takes the lot
+        rather than a hand-maintained list that silently rots as tables are added. The event
+        log is the exception — it carries a portfolio id but no foreign key, so its rows go
+        explicitly. A tombstone event is written afterwards, so the feed says the portfolio was
+        deleted rather than simply losing its history without explanation.
+        """
+        portfolio_id, name = portfolio.id, portfolio.name
+        await session.execute(delete(Event).where(Event.portfolio_id == portfolio_id))
+        await session.execute(delete(Portfolio).where(Portfolio.id == portfolio_id))
+        await session.flush()
+
+        await self._events.record(
+            session,
+            domain="broker",
+            kind="portfolio_deleted",
+            severity="warning",
+            user_id=portfolio.user_id,
+            portfolio_id=portfolio_id,
+            message=f"deleted portfolio {name!r}",
+        )
 
     async def cash(self, session: AsyncSession, portfolio_id: int) -> Decimal:
         return await self._ledger.balance(session, portfolio_id)

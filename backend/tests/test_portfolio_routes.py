@@ -2,9 +2,20 @@ from decimal import Decimal
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from tradebot.context import AppContext
-from tradebot.db.models import Instrument
+from tradebot.db.models import (
+    Event,
+    Fill,
+    Instrument,
+    LedgerEntry,
+    Lot,
+    Order,
+    PortfolioSnapshot,
+    Position,
+)
 
 PORTFOLIO = {"name": "Main", "initial_capital": "100000", "allow_fractional": True}
 
@@ -237,3 +248,144 @@ async def test_positions_and_fills_start_empty(
     assert (
         await client.get(f"/api/portfolios/{portfolio_id}/fills", headers=registered)
     ).json() == []
+
+
+async def test_deleting_a_portfolio_removes_it_and_its_history(
+    client: AsyncClient, registered: dict[str, str], portfolio_id: int, instrument: None
+) -> None:
+    await client.post(
+        f"/api/portfolios/{portfolio_id}/orders",
+        json={
+            "symbol": "AAA",
+            "side": "BUY",
+            "qty": "10",
+            "order_type": "LIMIT",
+            "limit_price": "100",
+        },
+        headers=registered,
+    )
+    await client.post(f"/api/portfolios/{portfolio_id}/snapshots", headers=registered)
+
+    deleted = await client.delete(f"/api/portfolios/{portfolio_id}", headers=registered)
+
+    assert deleted.status_code == 204
+    assert (await client.get("/api/portfolios", headers=registered)).json() == []
+    assert (
+        await client.get(f"/api/portfolios/{portfolio_id}", headers=registered)
+    ).status_code == 404
+    assert (
+        await client.get(f"/api/portfolios/{portfolio_id}/orders", headers=registered)
+    ).status_code == 404
+
+
+async def test_deleting_a_portfolio_clears_its_rows_from_every_table(
+    client: AsyncClient,
+    registered: dict[str, str],
+    portfolio_id: int,
+    instrument: None,
+    context: AppContext,
+) -> None:
+    """The cascade is declared on the foreign keys, so a missed table is silent until asserted.
+
+    Seeded through a holding rather than a resting order, so fills and lots exist too and the
+    two-level cascade (portfolio to orders to fills, portfolio to positions to lots) is covered
+    rather than assumed.
+    """
+    await client.post(
+        f"/api/portfolios/{portfolio_id}/holdings",
+        json={"symbol": "AAA", "qty": "10", "cost_basis": "100"},
+        headers=registered,
+    )
+    await client.post(f"/api/portfolios/{portfolio_id}/snapshots", headers=registered)
+
+    async with context.db.session() as session:
+        assert await _counts(session, portfolio_id) == {
+            "LedgerEntry": 1 + 1,  # the deposit, then the seeded buy
+            "Order": 1,
+            "PortfolioSnapshot": 1,
+            "Position": 1,
+            "Fill": 1,
+            "Lot": 1,
+        }
+
+    await client.delete(f"/api/portfolios/{portfolio_id}", headers=registered)
+
+    async with context.db.session() as session:
+        assert set((await _counts(session, portfolio_id)).values()) == {0}
+
+
+async def _counts(session: AsyncSession, portfolio_id: int) -> dict[str, int]:
+    """Rows still hanging off a portfolio, including the two tables reached only by cascade."""
+    counts: dict[str, int] = {}
+    for model in (LedgerEntry, Order, PortfolioSnapshot, Position):
+        counts[model.__name__] = int(
+            await session.scalar(
+                select(func.count()).select_from(model).where(model.portfolio_id == portfolio_id)
+            )
+            or 0
+        )
+
+    counts["Fill"] = int(
+        await session.scalar(
+            select(func.count())
+            .select_from(Fill)
+            .join(Order, Fill.order_id == Order.id)
+            .where(Order.portfolio_id == portfolio_id)
+        )
+        or 0
+    )
+    counts["Lot"] = int(
+        await session.scalar(
+            select(func.count())
+            .select_from(Lot)
+            .join(Position, Lot.position_id == Position.id)
+            .where(Position.portfolio_id == portfolio_id)
+        )
+        or 0
+    )
+    return counts
+
+
+async def test_deleting_a_portfolio_leaves_a_tombstone_event(
+    client: AsyncClient, registered: dict[str, str], portfolio_id: int, context: AppContext
+) -> None:
+    """Its own events go with it; one record of the deletion stays, or the feed just goes quiet."""
+    await client.delete(f"/api/portfolios/{portfolio_id}", headers=registered)
+
+    async with context.db.session() as session:
+        kinds = list(
+            await session.scalars(
+                select(Event.kind).where(Event.portfolio_id == portfolio_id).order_by(Event.id)
+            )
+        )
+
+    assert kinds == ["portfolio_deleted"]
+
+
+async def test_another_user_cannot_delete_a_portfolio(
+    client: AsyncClient, registered: dict[str, str], portfolio_id: int, other_user: dict[str, str]
+) -> None:
+    response = await client.delete(f"/api/portfolios/{portfolio_id}", headers=other_user)
+
+    assert response.status_code == 404
+    assert len((await client.get("/api/portfolios", headers=registered)).json()) == 1
+
+
+async def test_deleting_twice_is_a_404(
+    client: AsyncClient, registered: dict[str, str], portfolio_id: int
+) -> None:
+    await client.delete(f"/api/portfolios/{portfolio_id}", headers=registered)
+
+    again = await client.delete(f"/api/portfolios/{portfolio_id}", headers=registered)
+
+    assert again.status_code == 404
+
+
+async def test_the_name_is_free_again_after_deletion(
+    client: AsyncClient, registered: dict[str, str], portfolio_id: int
+) -> None:
+    await client.delete(f"/api/portfolios/{portfolio_id}", headers=registered)
+
+    recreated = await client.post("/api/portfolios", json=PORTFOLIO, headers=registered)
+
+    assert recreated.status_code == 201

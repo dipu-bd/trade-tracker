@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
+import { Trash2 } from 'lucide-react'
 import { useState } from 'react'
 
 import { api } from '@/api/client'
@@ -16,6 +17,7 @@ import {
 
 import {
   useCreatePortfolio,
+  useDeletePortfolio,
   useFills,
   useLedger,
   useOrders,
@@ -40,7 +42,51 @@ import {
   Table,
   inputClass,
 } from '@/components/ui'
+import type { Portfolio } from '@/api/types'
 import { money, num, percent, qty, tone, when } from '@/lib/format'
+
+function DeletePortfolio({
+  portfolio,
+  onDeleted,
+}: {
+  portfolio: Portfolio
+  onDeleted?: () => void
+}) {
+  const toast = useToast()
+  const remove = useDeletePortfolio()
+  const [confirming, setConfirming] = useState(false)
+
+  const destroy = () =>
+    remove.mutate(portfolio.id, {
+      onSuccess: () => {
+        setConfirming(false)
+        toast(`Deleted ${portfolio.name}.`, 'ok')
+        onDeleted?.()
+      },
+      onError: (error) => toast((error as Error).message, 'bad'),
+    })
+
+  if (!confirming) {
+    return (
+      <Button variant="ghost" onClick={() => setConfirming(true)}>
+        <Trash2 className="h-4 w-4" aria-hidden />
+        Delete
+      </Button>
+    )
+  }
+
+  return (
+    <span className="flex items-center gap-2 whitespace-nowrap">
+      <span className="text-xs text-[var(--color-ink-muted)]">Erase it and its history?</span>
+      <Button variant="danger" onClick={destroy} disabled={remove.isPending}>
+        {remove.isPending ? 'Deleting…' : 'Delete'}
+      </Button>
+      <Button variant="ghost" onClick={() => setConfirming(false)} disabled={remove.isPending}>
+        Cancel
+      </Button>
+    </span>
+  )
+}
 
 export function PortfolioList() {
   const navigate = useNavigate()
@@ -53,7 +99,7 @@ export function PortfolioList() {
     <div className="grid gap-4">
       <Card title="Portfolios">
         <QueryState query={portfolios} empty="No portfolios yet. Create one below to begin paper trading.">
-          <Table head={['Name', 'Benchmark', 'Initial capital', 'Created', '']}>
+          <Table head={['Name', 'Benchmark', 'Initial capital', 'Created', 'Status', '']}>
             {(portfolios.data ?? []).map((row) => (
               <Row
                 key={row.id}
@@ -67,6 +113,15 @@ export function PortfolioList() {
                   <Badge tone={row.is_active ? 'ok' : 'muted'}>
                     {row.is_active ? 'active' : 'paused'}
                   </Badge>
+                </Cell>
+                <Cell className="text-right">
+                  {/* The row navigates on click, so the destructive control must not bubble. */}
+                  <span
+                    className="inline-flex"
+                    onClickCapture={(event) => event.stopPropagation()}
+                  >
+                    <DeletePortfolio portfolio={row} />
+                  </span>
                 </Cell>
               </Row>
             ))}
@@ -114,6 +169,7 @@ export function PortfolioList() {
 }
 
 export function PortfolioDetailPage({ id }: { id: number }) {
+  const navigate = useNavigate()
   const detail = usePortfolio(id)
   const positions = usePositions(id)
   const snapshots = useSnapshots(id)
@@ -135,6 +191,12 @@ export function PortfolioDetailPage({ id }: { id: number }) {
         title={detail.data?.name ?? 'Portfolio'}
         action={
           <div className="flex gap-2">
+            {detail.data && (
+              <DeletePortfolio
+                portfolio={detail.data}
+                onDeleted={() => void navigate({ to: '/portfolios' })}
+              />
+            )}
             <Button onClick={() => reconcile.mutate()}>Reconcile</Button>
             <Button variant="primary" onClick={() => runCycle.mutate()} disabled={runCycle.isPending}>
               {runCycle.isPending ? 'Running…' : 'Run cycle'}
