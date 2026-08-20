@@ -168,6 +168,10 @@ class Order(Base, TimestampMixin):
     filled_qty: Mapped[Decimal] = mapped_column(QUANTITY, default=Decimal(0))
     avg_fill_price: Mapped[Decimal | None] = mapped_column(PRICE, default=None)
     reserved_cash: Mapped[Decimal] = mapped_column(MONEY, default=Decimal(0))
+    # Once a stop level has been breached the order is elected and stays elected, even if the
+    # price comes back through it. That has to outlive the matching pass that saw the breach,
+    # which builds a fresh BrokerService every time, so it belongs on the row and not in memory.
+    stop_armed: Mapped[bool] = mapped_column(Boolean, default=False)
 
     submitted_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
     expires_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)

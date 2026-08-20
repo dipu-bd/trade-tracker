@@ -13,6 +13,7 @@ from tradebot.core.errors import ValidationError
 from tradebot.db.models import (
     Instrument,
     LedgerEntry,
+    Order,
     OrderStatus,
     OrderType,
     Portfolio,
@@ -645,3 +646,151 @@ async def test_seeding_more_than_the_cash_allows_is_rejected(
                 cost_basis=Decimal(100),
                 opened_at=NOW,
             )
+
+
+async def test_a_second_full_size_sell_is_rejected_against_reserved_shares(
+    context: AppContext, broker: BrokerService
+) -> None:
+    """Shares behind a resting sell are spoken for, exactly as cash behind a resting buy is."""
+    ids = await setup(context, slippage_bps=Decimal(0), commission_bps=Decimal(0))
+    await buy(context, broker, ids, "10", "100")
+
+    async with context.db.session() as session:
+        portfolio = await session.get(Portfolio, ids[0])
+        instrument = await session.get(Instrument, ids[1])
+        first = await broker.place_order(
+            session,
+            portfolio=portfolio,
+            instrument=instrument,
+            side=Side.SELL,
+            qty=Decimal(10),
+            order_type=OrderType.LIMIT,
+            limit_price=Decimal(200),
+            reference_price=Decimal(100),
+        )
+        second = await broker.place_order(
+            session,
+            portfolio=portfolio,
+            instrument=instrument,
+            side=Side.SELL,
+            qty=Decimal(10),
+            reference_price=Decimal(100),
+        )
+
+    assert first.status == OrderStatus.ACCEPTED
+    assert second.status == OrderStatus.REJECTED
+    assert "unreserved" in (second.reject_reason or "")
+
+
+async def test_a_sell_left_with_no_shares_expires_instead_of_killing_the_pass(
+    context: AppContext, broker: BrokerService
+) -> None:
+    """Two sells that slipped past placement must not take the good fill down with them.
+
+    Before shares were reserved these were both accepted; the first closed the position and
+    the second raised out of `on_quote`, rolling back the pass and repeating on every one
+    after it. The second order is now simply spent.
+    """
+    ids = await setup(context, slippage_bps=Decimal(0), commission_bps=Decimal(0))
+    await buy(context, broker, ids, "10", "100")
+
+    async with context.db.session() as session:
+        portfolio = await session.get(Portfolio, ids[0])
+        instrument = await session.get(Instrument, ids[1])
+        first = await broker.place_order(
+            session,
+            portfolio=portfolio,
+            instrument=instrument,
+            side=Side.SELL,
+            qty=Decimal(10),
+            reference_price=Decimal(100),
+        )
+        # Forced past the reservation check, as a row written before it existed would be.
+        second = Order(
+            portfolio_id=portfolio.id,
+            instrument_id=instrument.id,
+            client_order_id="legacy-oversell",
+            side=Side.SELL,
+            order_type=OrderType.MARKET,
+            time_in_force=TimeInForce.GTC,
+            qty=Decimal(10),
+            status=OrderStatus.ACCEPTED,
+            submitted_at=NOW,
+        )
+        session.add(second)
+        await session.flush()
+
+        report = await broker.on_quote(session, portfolio, instrument, quote("120"))
+
+    assert [fill.order_id for fill in report.fills] == [first.id]
+    assert report.expired == [second.id]
+
+    async with context.db.session() as session:
+        assert_ok(await reconcile(session, Ledger(), ids[0]))
+
+
+async def test_a_stop_limit_stays_armed_across_matching_passes(
+    context: AppContext, broker: BrokerService
+) -> None:
+    """Election is a latch: once the stop trades through, the limit works on every later tick.
+
+    The arming flag lives on the order rather than in the service, because each matching pass
+    builds a fresh `BrokerService` and would otherwise forget the breach it just saw.
+    """
+    ids = await setup(context, slippage_bps=Decimal(0), commission_bps=Decimal(0))
+    await buy(context, broker, ids, "10", "100")
+
+    async with context.db.session() as session:
+        portfolio = await session.get(Portfolio, ids[0])
+        instrument = await session.get(Instrument, ids[1])
+        order = await broker.place_order(
+            session,
+            portfolio=portfolio,
+            instrument=instrument,
+            side=Side.SELL,
+            qty=Decimal(10),
+            order_type=OrderType.STOP_LIMIT,
+            time_in_force=TimeInForce.GTC,
+            stop_price=Decimal(95),
+            limit_price=Decimal(96),
+        )
+
+    # Trades through the stop, but 94 is under the 96 floor, so it elects without filling.
+    async with context.db.session() as session:
+        portfolio = await session.get(Portfolio, ids[0])
+        instrument = await session.get(Instrument, ids[1])
+        report = await broker.on_quote(session, portfolio, instrument, quote("94"))
+        assert report.fills == []
+        assert report.armed == [order.id]
+
+    # A different service, as the scheduler makes one per pass. The stop is no longer breached
+    # at 97, but the order was elected and its limit is now satisfiable.
+    clock = FrozenClock(NOW)
+    fresh = BrokerService(Ledger(clock=clock), context.events, clock=clock)
+    async with context.db.session() as session:
+        portfolio = await session.get(Portfolio, ids[0])
+        instrument = await session.get(Instrument, ids[1])
+        report = await fresh.on_quote(session, portfolio, instrument, quote("97"))
+
+    assert [fill.order_id for fill in report.fills] == [order.id]
+
+
+async def test_a_snapshot_reports_banked_profit_not_trading_cash_flow(
+    context: AppContext, broker: BrokerService
+) -> None:
+    """An open position is not a realized loss the size of what it cost to buy."""
+    ids = await setup(context, slippage_bps=Decimal(0), commission_bps=Decimal(0))
+    await buy(context, broker, ids, "10", "100")
+
+    async with context.db.session() as session:
+        portfolio = await session.get(Portfolio, ids[0])
+        snapshot = await broker.snapshot(session, portfolio, {ids[1]: Decimal(100)})
+        assert snapshot.realized_pnl == Decimal(0)
+
+    await sell(context, broker, ids, "10", "130")
+
+    async with context.db.session() as session:
+        portfolio = await session.get(Portfolio, ids[0])
+        snapshot = await broker.snapshot(session, portfolio, {})
+
+    assert snapshot.realized_pnl == Decimal(300)
