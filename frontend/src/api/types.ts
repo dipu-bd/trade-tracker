@@ -15,6 +15,7 @@ export type StrategySummary = S['StrategySummary']
 export type DecisionRun = S['DecisionRunOut']
 export type DecisionRunDetail = S['DecisionRunDetail']
 export type CycleTriggered = S['CycleTriggered']
+export type MatchRun = S['MatchRun']
 export type ScheduledJob = S['ScheduledJob']
 
 export type AICall = S['AICallOut']

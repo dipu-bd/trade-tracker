@@ -13,6 +13,7 @@ from tradebot.context import AppContext
 from tradebot.core.logging import get_logger
 from tradebot.db.models import Portfolio
 from tradebot.engine.cycle import CycleReport, DecisionCycle
+from tradebot.workers.matching import MatchingPass
 
 _log = get_logger(__name__)
 
@@ -31,6 +32,7 @@ class EngineRunner:
         self._context = context
         self._locks: dict[int, asyncio.Lock] = {}
         self._client = AIClient(clock=context.clock)
+        self._matching = MatchingPass(context)
         self._cache = AnalystCache()
 
     def _cycle(self, keys: dict[str, str]) -> DecisionCycle:
@@ -58,7 +60,18 @@ class EngineRunner:
                 raise RuntimeError(f"portfolio {portfolio_id} not found")
 
             keys = await self._context.providers.llm_keys(session, portfolio.user_id)
-            return await self._cycle(keys).run(session, portfolio, trigger=trigger)
+            report = await self._cycle(keys).run(session, portfolio, trigger=trigger)
+
+        # Outside the cycle's session and lock: the orders it just placed should be worked now
+        # rather than at the next interval, but a matching failure must not undo the cycle.
+        await self._match(portfolio_id)
+        return report
+
+    async def _match(self, portfolio_id: int) -> None:
+        try:
+            await self._matching.run(portfolio_id)
+        except Exception as error:
+            _log.warning("post_cycle_match_failed", portfolio_id=portfolio_id, error=str(error))
 
     async def run_due(self, cadence: str) -> list[CycleReport]:
         async with self._context.db.session() as session:

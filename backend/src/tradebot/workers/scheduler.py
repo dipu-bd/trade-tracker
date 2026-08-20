@@ -8,6 +8,7 @@ from tradebot.context import AppContext
 from tradebot.core.logging import get_logger
 from tradebot.engine.runner import EngineRunner
 from tradebot.marketdata.refresh import MarketSync
+from tradebot.workers.matching import MatchingPass
 
 _log = get_logger(__name__)
 
@@ -29,6 +30,7 @@ CADENCES = (
 BY_NAME = {cadence.name: cadence for cadence in CADENCES}
 
 MARKET_REFRESH_JOB = "market:refresh"
+MATCH_JOB = "broker:match"
 
 
 class EngineScheduler:
@@ -42,6 +44,7 @@ class EngineScheduler:
         self._context = context
         self._runner = EngineRunner(context)
         self._sync = MarketSync(context)
+        self._matching = MatchingPass(context)
         self._scheduler = AsyncIOScheduler(timezone="UTC")
 
     @property
@@ -71,6 +74,18 @@ class EngineScheduler:
             max_instances=1,
             coalesce=True,
         )
+
+        # Its own job rather than a step tacked onto the refresh: a full universe pass runs for
+        # minutes, and matching must not wait on it. Quotes from the previous refresh are one
+        # interval old at worst, which the pass checks for itself.
+        self._scheduler.add_job(
+            self._run_match_pass,
+            IntervalTrigger(minutes=minutes),
+            id=MATCH_JOB,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
         self._scheduler.start()
         _log.info("scheduler_started", cadences=[item.name for item in CADENCES])
 
@@ -78,6 +93,16 @@ class EngineScheduler:
         self._context.sync_job.start(
             "scheduled", lambda progress: self._sync.scheduled(progress=progress)
         )
+
+    async def _run_match_pass(self) -> None:
+        report = await self._matching.run()
+        if report.filled or report.expired or report.stops:
+            _log.info(
+                "match_pass",
+                filled=report.filled,
+                expired=report.expired,
+                stops=report.stops,
+            )
 
     def shutdown(self) -> None:
         if self._scheduler.running:
@@ -97,6 +122,6 @@ class EngineScheduler:
         kind, _, name = job_id.partition(":")
         if kind == "cycle" and name in BY_NAME:
             return BY_NAME[name].cron
-        if job_id == MARKET_REFRESH_JOB:
+        if job_id in (MARKET_REFRESH_JOB, MATCH_JOB):
             return f"every {self._context.settings.market_refresh_minutes}m"
         return None

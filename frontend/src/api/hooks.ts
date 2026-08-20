@@ -16,6 +16,7 @@ import type {
   Instrument,
   LedgerEntry,
   Lesson,
+  MatchRun,
   Order,
   Portfolio,
   PortfolioDetail,
@@ -199,7 +200,19 @@ export function useRunCycle(id: number) {
   return useMutation({
     mutationFn: () => api<CycleTriggered>(`/portfolios/${id}/cycles`, { method: 'POST' }),
     onSuccess: () => {
-      for (const key of ['cycles', 'orders', 'positions', 'portfolio', 'aicalls', 'aispend']) {
+      for (const key of ['cycles', 'orders', 'fills', 'ledger', 'positions', 'portfolio', 'aicalls', 'aispend']) {
+        void client.invalidateQueries({ queryKey: [key, id] })
+      }
+    },
+  })
+}
+
+export function useMatchOrders(id: number) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: () => api<MatchRun>(`/portfolios/${id}/match`, { method: 'POST' }),
+    onSuccess: () => {
+      for (const key of ['orders', 'fills', 'ledger', 'positions', 'portfolio']) {
         void client.invalidateQueries({ queryKey: [key, id] })
       }
     },
