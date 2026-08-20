@@ -233,7 +233,7 @@ export function PortfolioList() {
                   </Badge>
                 </Cell>
                 <Cell className="text-right">
-                  {/* The row navigates on click, so the destructive control must not bubble. */}
+                  {/* The row navigates on click, so these controls must not bubble. */}
                   <span
                     className="inline-flex"
                     onClickCapture={(event) => event.stopPropagation()}
