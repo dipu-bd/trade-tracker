@@ -101,6 +101,48 @@ class BrokerService:
         )
         return portfolio
 
+    async def update_portfolio(
+        self, session: AsyncSession, portfolio: Portfolio, **changes: object
+    ) -> Portfolio:
+        """Apply a partial edit, rejecting a name another portfolio already answers to.
+
+        Cost-model changes are deliberately not retroactive: fills already priced through the
+        old slippage and commission stay as they were, because rewriting them would move an
+        equity curve that has already been reported.
+        """
+        name = changes.get("name")
+        if isinstance(name, str) and name != portfolio.name:
+            clash = await session.scalar(
+                select(Portfolio).where(
+                    Portfolio.user_id == portfolio.user_id,
+                    Portfolio.name == name,
+                    Portfolio.id != portfolio.id,
+                )
+            )
+            if clash is not None:
+                raise ConflictError(f"a portfolio named {name!r} already exists")
+
+        was_active = portfolio.is_active
+        for field_name, value in changes.items():
+            setattr(portfolio, field_name, value)
+        await session.flush()
+
+        if portfolio.is_active != was_active:
+            await self._events.record(
+                session,
+                domain="broker",
+                kind="portfolio_resumed" if portfolio.is_active else "portfolio_paused",
+                severity="info" if portfolio.is_active else "warning",
+                user_id=portfolio.user_id,
+                portfolio_id=portfolio.id,
+                message=(
+                    f"resumed {portfolio.name!r}"
+                    if portfolio.is_active
+                    else f"paused {portfolio.name!r}: no cycles and no matching until resumed"
+                ),
+            )
+        return portfolio
+
     async def delete_portfolio(self, session: AsyncSession, portfolio: Portfolio) -> None:
         """Erase a portfolio and everything projected from it.
 
@@ -235,15 +277,22 @@ class BrokerService:
         order: Order,
         reference_price: Decimal | None,
     ) -> str | None:
+        if not portfolio.is_active:
+            return "portfolio is paused"
+
         asset_class = AssetClass(instrument.asset_class)
         closed = not calendar.is_open(self._clock.now(), asset_class)
         if closed and order.time_in_force == TimeInForce.IOC:
             return "market closed"
 
         if order.side == Side.SELL:
+            position = await self._open_position(session, portfolio.id, instrument.id)
+            held = position.qty if position else ZERO
             sellable = await self._sellable_qty(session, portfolio.id, instrument.id, exclude=order)
             if order.qty > sellable:
-                return f"insufficient position: {sellable} unreserved"
+                committed = held - sellable
+                detail = f" ({committed} on resting sells)" if committed > ZERO else ""
+                return f"insufficient position: {sellable} of {held} available{detail}"
             return None
 
         reference = order.limit_price or reference_price

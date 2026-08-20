@@ -20,6 +20,7 @@ import type {
   Order,
   Portfolio,
   PortfolioDetail,
+  PortfolioUpdate,
   Position,
   Preset,
   ProviderHealth,
@@ -234,6 +235,32 @@ export function useCreatePortfolio() {
     mutationFn: (body: { name: string; initial_capital: string; allow_fractional: boolean }) =>
       api<Portfolio>('/portfolios', { method: 'POST', body: JSON.stringify(body) }),
     onSuccess: () => void client.invalidateQueries({ queryKey: ['portfolios'] }),
+  })
+}
+
+export function useUpdatePortfolio(id: number) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (body: PortfolioUpdate) =>
+      api<Portfolio>(`/portfolios/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['portfolios'] })
+      void client.invalidateQueries({ queryKey: ['portfolio', id] })
+    },
+  })
+}
+
+export function useCancelOrder(id: number) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (orderId: number) =>
+      api<Order>(`/portfolios/${id}/orders/${orderId}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      // The reservation the order held is released, so buying power moves with it.
+      for (const key of ['orders', 'portfolio']) {
+        void client.invalidateQueries({ queryKey: [key, id] })
+      }
+    },
   })
 }
 

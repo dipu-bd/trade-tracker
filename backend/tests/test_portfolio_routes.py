@@ -389,3 +389,119 @@ async def test_the_name_is_free_again_after_deletion(
     recreated = await client.post("/api/portfolios", json=PORTFOLIO, headers=registered)
 
     assert recreated.status_code == 201
+
+
+async def test_a_portfolio_can_be_renamed_and_retuned(
+    client: AsyncClient, registered: dict[str, str], portfolio_id: int
+) -> None:
+    response = await client.patch(
+        f"/api/portfolios/{portfolio_id}",
+        json={"name": "Renamed", "slippage_bps": "25", "allow_fractional": False},
+        headers=registered,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "Renamed"
+    assert Decimal(response.json()["slippage_bps"]) == Decimal(25)
+    assert response.json()["allow_fractional"] is False
+
+
+async def test_an_edit_only_touches_what_it_names(
+    client: AsyncClient, registered: dict[str, str], portfolio_id: int
+) -> None:
+    before = (await client.get(f"/api/portfolios/{portfolio_id}", headers=registered)).json()
+    after = (
+        await client.patch(
+            f"/api/portfolios/{portfolio_id}", json={"is_active": False}, headers=registered
+        )
+    ).json()
+
+    assert after["name"] == before["name"]
+    assert after["slippage_bps"] == before["slippage_bps"]
+    assert after["is_active"] is False
+
+
+async def test_renaming_onto_another_portfolio_conflicts(
+    client: AsyncClient, registered: dict[str, str], portfolio_id: int
+) -> None:
+    await client.post("/api/portfolios", json={**PORTFOLIO, "name": "Second"}, headers=registered)
+    response = await client.patch(
+        f"/api/portfolios/{portfolio_id}", json={"name": "Second"}, headers=registered
+    )
+
+    assert response.status_code == 409
+
+
+async def test_another_account_cannot_edit_your_portfolio(
+    client: AsyncClient, registered: dict[str, str], portfolio_id: int, other_user: dict[str, str]
+) -> None:
+    response = await client.patch(
+        f"/api/portfolios/{portfolio_id}", json={"name": "Theirs"}, headers=other_user
+    )
+
+    assert response.status_code == 404
+
+
+async def test_a_paused_portfolio_neither_trades_nor_runs(
+    client: AsyncClient, registered: dict[str, str], portfolio_id: int, instrument: None
+) -> None:
+    """Pausing has to reach every path that can trade, or it is only decoration."""
+    await client.patch(
+        f"/api/portfolios/{portfolio_id}", json={"is_active": False}, headers=registered
+    )
+
+    order = await client.post(
+        f"/api/portfolios/{portfolio_id}/orders",
+        json={"symbol": "AAA", "side": "BUY", "qty": "1"},
+        headers=registered,
+    )
+    cycle = await client.post(f"/api/portfolios/{portfolio_id}/cycles", headers=registered)
+
+    assert order.json()["status"] == "REJECTED"
+    assert order.json()["reject_reason"] == "portfolio is paused"
+    assert cycle.status_code == 409
+
+
+async def test_resuming_lets_it_trade_again(
+    client: AsyncClient, registered: dict[str, str], portfolio_id: int, instrument: None
+) -> None:
+    await client.patch(
+        f"/api/portfolios/{portfolio_id}", json={"is_active": False}, headers=registered
+    )
+    await client.patch(
+        f"/api/portfolios/{portfolio_id}", json={"is_active": True}, headers=registered
+    )
+
+    order = await client.post(
+        f"/api/portfolios/{portfolio_id}/orders",
+        json={"symbol": "AAA", "side": "BUY", "qty": "1"},
+        headers=registered,
+    )
+
+    assert order.json()["status"] == "ACCEPTED"
+
+
+async def test_pausing_and_resuming_are_recorded(
+    client: AsyncClient, registered: dict[str, str], portfolio_id: int, context: AppContext
+) -> None:
+    await client.patch(
+        f"/api/portfolios/{portfolio_id}", json={"is_active": False}, headers=registered
+    )
+    await client.patch(
+        f"/api/portfolios/{portfolio_id}", json={"name": "Still paused"}, headers=registered
+    )
+    await client.patch(
+        f"/api/portfolios/{portfolio_id}", json={"is_active": True}, headers=registered
+    )
+
+    async with context.db.session() as session:
+        kinds = list(
+            await session.scalars(
+                select(Event.kind)
+                .where(Event.kind.in_(("portfolio_paused", "portfolio_resumed")))
+                .order_by(Event.id)
+            )
+        )
+
+    # The rename in the middle changes nothing about the state and so records nothing.
+    assert kinds == ["portfolio_paused", "portfolio_resumed"]

@@ -345,7 +345,15 @@ export interface paths {
         delete: operations["delete_portfolio_api_portfolios__portfolio_id__delete"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update Portfolio
+         * @description Rename a portfolio, retune its cost model, or pause and resume it.
+         *
+         *     A paused portfolio is skipped by the scheduled cycles and by order matching, so nothing
+         *     trades and nothing fills until it is resumed. Resting orders are left alone rather than
+         *     cancelled — a pause is meant to be undone.
+         */
+        patch: operations["update_portfolio_api_portfolios__portfolio_id__patch"];
         trace?: never;
     };
     "/api/portfolios/{portfolio_id}/orders": {
@@ -1918,6 +1926,8 @@ export interface components {
             slippage_bps: string;
             /** Commission Bps */
             commission_bps: string;
+            /** Min Commission */
+            min_commission: string;
             /** Allow Fractional */
             allow_fractional: boolean;
             /**
@@ -1952,6 +1962,8 @@ export interface components {
             slippage_bps: string;
             /** Commission Bps */
             commission_bps: string;
+            /** Min Commission */
+            min_commission: string;
             /** Allow Fractional */
             allow_fractional: boolean;
             /**
@@ -1959,6 +1971,31 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * PortfolioUpdate
+         * @description A partial edit: every field is optional and only what is sent is changed.
+         *
+         *     `initial_capital` is absent on purpose. It is the first ledger entry, and the ledger is
+         *     append-only — restating it would silently invalidate every equity point and drawdown
+         *     already recorded against it.
+         */
+        PortfolioUpdate: {
+            /** Name */
+            name?: string | null;
+            /**
+             * Is Active
+             * @description False pauses the portfolio: no scheduled cycles, no order matching.
+             */
+            is_active?: boolean | null;
+            /** Slippage Bps */
+            slippage_bps?: number | string | null;
+            /** Commission Bps */
+            commission_bps?: number | string | null;
+            /** Min Commission */
+            min_commission?: number | string | null;
+            /** Allow Fractional */
+            allow_fractional?: boolean | null;
         };
         /** PositionOut */
         PositionOut: {
@@ -2813,6 +2850,41 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_portfolio_api_portfolios__portfolio_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortfolioUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioOut"];
+                };
             };
             /** @description Validation Error */
             422: {

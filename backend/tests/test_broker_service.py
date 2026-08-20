@@ -679,7 +679,7 @@ async def test_a_second_full_size_sell_is_rejected_against_reserved_shares(
 
     assert first.status == OrderStatus.ACCEPTED
     assert second.status == OrderStatus.REJECTED
-    assert "unreserved" in (second.reject_reason or "")
+    assert "on resting sells" in (second.reject_reason or "")
 
 
 async def test_a_sell_left_with_no_shares_expires_instead_of_killing_the_pass(

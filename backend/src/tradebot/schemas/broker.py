@@ -15,6 +15,25 @@ class PortfolioCreate(BaseModel):
     allow_fractional: bool = False
 
 
+class PortfolioUpdate(BaseModel):
+    """A partial edit: every field is optional and only what is sent is changed.
+
+    `initial_capital` is absent on purpose. It is the first ledger entry, and the ledger is
+    append-only — restating it would silently invalidate every equity point and drawdown
+    already recorded against it.
+    """
+
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    is_active: bool | None = Field(
+        default=None,
+        description="False pauses the portfolio: no scheduled cycles, no order matching.",
+    )
+    slippage_bps: Decimal | None = Field(default=None, ge=0, le=1000)
+    commission_bps: Decimal | None = Field(default=None, ge=0, le=1000)
+    min_commission: Decimal | None = Field(default=None, ge=0)
+    allow_fractional: bool | None = None
+
+
 class PortfolioOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -25,6 +44,7 @@ class PortfolioOut(BaseModel):
     initial_capital: Decimal
     slippage_bps: Decimal
     commission_bps: Decimal
+    min_commission: Decimal
     allow_fractional: bool
     created_at: datetime
 

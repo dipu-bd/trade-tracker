@@ -28,6 +28,7 @@ from tradebot.schemas.broker import (
     PortfolioCreate,
     PortfolioDetail,
     PortfolioOut,
+    PortfolioUpdate,
     PositionOut,
     ReconciliationOut,
     SnapshotOut,
@@ -97,6 +98,27 @@ async def get_portfolio(
         equity=await broker.equity(session, portfolio_id, marks),
         open_positions=len(await broker.open_positions(session, portfolio_id)),
     )
+
+
+@router.patch("/{portfolio_id}", response_model=PortfolioOut)
+async def update_portfolio(
+    portfolio_id: int,
+    body: PortfolioUpdate,
+    user: CurrentUser,
+    context: Context,
+    session: DbSession,
+) -> PortfolioOut:
+    """Rename a portfolio, retune its cost model, or pause and resume it.
+
+    A paused portfolio is skipped by the scheduled cycles and by order matching, so nothing
+    trades and nothing fills until it is resumed. Resting orders are left alone rather than
+    cancelled — a pause is meant to be undone.
+    """
+    portfolio = await load_portfolio(session, portfolio_id, user.id)
+    changes = body.model_dump(exclude_unset=True, exclude_none=True)
+    if changes:
+        await _broker(context).update_portfolio(session, portfolio, **changes)
+    return PortfolioOut.model_validate(portfolio)
 
 
 @router.delete("/{portfolio_id}", status_code=status.HTTP_204_NO_CONTENT)

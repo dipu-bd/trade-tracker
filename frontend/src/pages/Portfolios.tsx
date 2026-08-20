@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { Trash2 } from 'lucide-react'
+import { Pause, Play, Trash2, X } from 'lucide-react'
 import { useState } from 'react'
 
 import { api } from '@/api/client'
@@ -16,6 +16,7 @@ import {
 } from 'recharts'
 
 import {
+  useCancelOrder,
   useCreatePortfolio,
   useDeletePortfolio,
   useFills,
@@ -28,6 +29,7 @@ import {
   useReconcile,
   useRunCycle,
   useSnapshots,
+  useUpdatePortfolio,
 } from '@/api/hooks'
 import {
   Badge,
@@ -43,7 +45,7 @@ import {
   Table,
   inputClass,
 } from '@/components/ui'
-import type { Portfolio } from '@/api/types'
+import type { Order, Portfolio } from '@/api/types'
 import { money, num, percent, qty, tone, when } from '@/lib/format'
 
 function DeletePortfolio({
@@ -89,6 +91,121 @@ function DeletePortfolio({
   )
 }
 
+function PauseResume({ portfolio }: { portfolio: Portfolio }) {
+  const toast = useToast()
+  const update = useUpdatePortfolio(portfolio.id)
+  const paused = !portfolio.is_active
+
+  const toggle = () =>
+    update.mutate(
+      { is_active: paused },
+      {
+        onSuccess: () =>
+          toast(paused ? `Resumed ${portfolio.name}.` : `Paused ${portfolio.name}.`, 'ok'),
+        onError: (error) => toast((error as Error).message, 'bad'),
+      },
+    )
+
+  return (
+    <Button
+      variant="ghost"
+      onClick={toggle}
+      disabled={update.isPending}
+      title={
+        paused
+          ? 'Resume scheduled cycles and order matching'
+          : 'Stop scheduled cycles and order matching. Resting orders are left alone.'
+      }
+    >
+      {paused ? <Play className="h-4 w-4" aria-hidden /> : <Pause className="h-4 w-4" aria-hidden />}
+      {paused ? 'Resume' : 'Pause'}
+    </Button>
+  )
+}
+
+function PortfolioSettings({ portfolio }: { portfolio: Portfolio }) {
+  const toast = useToast()
+  const update = useUpdatePortfolio(portfolio.id)
+  const [name, setName] = useState(portfolio.name)
+  const [slippage, setSlippage] = useState(String(portfolio.slippage_bps))
+  const [commission, setCommission] = useState(String(portfolio.commission_bps))
+  const [minCommission, setMinCommission] = useState(String(portfolio.min_commission))
+  const [fractional, setFractional] = useState(portfolio.allow_fractional)
+
+  return (
+    <Card title="Settings">
+      <p className="mb-3 text-sm text-[var(--color-ink-muted)]">
+        Costs apply to fills from here on. Trades already executed keep the prices they got, so
+        the equity curve behind you does not move. Initial capital is the ledger’s first entry
+        and cannot be restated.
+      </p>
+      <form
+        className="grid items-end gap-3 sm:grid-cols-3"
+        onSubmit={(event) => {
+          event.preventDefault()
+          update.mutate(
+            {
+              name,
+              slippage_bps: slippage,
+              commission_bps: commission,
+              min_commission: minCommission,
+              allow_fractional: fractional,
+            },
+            { onSuccess: () => toast('Settings saved.', 'ok') },
+          )
+        }}
+      >
+        <Field label="Name">
+          <input
+            className={inputClass}
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            required
+          />
+        </Field>
+        <Field label="Slippage (bps)">
+          <input
+            className={inputClass}
+            value={slippage}
+            onChange={(event) => setSlippage(event.target.value)}
+            required
+          />
+        </Field>
+        <Field label="Commission (bps)">
+          <input
+            className={inputClass}
+            value={commission}
+            onChange={(event) => setCommission(event.target.value)}
+            required
+          />
+        </Field>
+        <Field label="Minimum commission">
+          <input
+            className={inputClass}
+            value={minCommission}
+            onChange={(event) => setMinCommission(event.target.value)}
+            required
+          />
+        </Field>
+        <Field label="Fractional units">
+          <select
+            className={inputClass}
+            value={fractional ? 'yes' : 'no'}
+            onChange={(event) => setFractional(event.target.value === 'yes')}
+          >
+            <option value="yes">Allowed</option>
+            <option value="no">Whole units only</option>
+          </select>
+        </Field>
+        <Button type="submit" variant="primary" disabled={update.isPending || !name}>
+          {update.isPending ? 'Saving…' : 'Save settings'}
+        </Button>
+      </form>
+      <ErrorNote error={update.error} className="mt-3" />
+    </Card>
+  )
+}
+
 export function PortfolioList() {
   const navigate = useNavigate()
   const portfolios = usePortfolios()
@@ -121,6 +238,7 @@ export function PortfolioList() {
                     className="inline-flex"
                     onClickCapture={(event) => event.stopPropagation()}
                   >
+                    <PauseResume portfolio={row} />
                     <DeletePortfolio portfolio={row} />
                   </span>
                 </Cell>
@@ -185,13 +303,15 @@ export function PortfolioDetailPage({ id }: { id: number }) {
   const equity = num(detail.data?.equity)
   const initial = num(detail.data?.initial_capital)
   const growth = initial > 0 ? equity / initial - 1 : 0
+  const paused = detail.data ? !detail.data.is_active : false
 
   return (
     <div className="grid gap-4">
       <Card
         title={detail.data?.name ?? 'Portfolio'}
         action={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            {detail.data && <PauseResume portfolio={detail.data} />}
             {detail.data && (
               <DeletePortfolio
                 portfolio={detail.data}
@@ -199,12 +319,22 @@ export function PortfolioDetailPage({ id }: { id: number }) {
               />
             )}
             <Button onClick={() => reconcile.mutate()}>Reconcile</Button>
-            <Button variant="primary" onClick={() => runCycle.mutate()} disabled={runCycle.isPending}>
+            <Button
+              variant="primary"
+              onClick={() => runCycle.mutate()}
+              disabled={runCycle.isPending || paused}
+            >
               {runCycle.isPending ? 'Running…' : 'Run cycle'}
             </Button>
           </div>
         }
       >
+        {paused && (
+          <p className="mb-3 text-sm text-[var(--color-warn)]">
+            Paused. Scheduled cycles and order matching are both stopped, and new orders are
+            rejected. Resting orders are untouched and resume working when you do.
+          </p>
+        )}
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
           <Stat label="Equity" value={money(detail.data?.equity)} className={tone(growth)} />
           <Stat label="Growth" value={percent(growth)} className={tone(growth)} />
@@ -280,10 +410,24 @@ export function PortfolioDetailPage({ id }: { id: number }) {
           </Table>
         </QueryState>
       </Card>
+
+      {/* Keyed on the id so switching portfolios refills the form rather than keeping the
+          previous one's values in its state. */}
+      {detail.data && <PortfolioSettings key={detail.data.id} portfolio={detail.data} />}
     </div>
   )
 }
 
+
+const ORDER_TYPES = [
+  { value: 'MARKET', label: 'Market' },
+  { value: 'LIMIT', label: 'Limit' },
+  { value: 'STOP', label: 'Stop' },
+  { value: 'STOP_LIMIT', label: 'Stop limit' },
+] as const
+
+const NEEDS_LIMIT = new Set(['LIMIT', 'STOP_LIMIT'])
+const NEEDS_STOP = new Set(['STOP', 'STOP_LIMIT'])
 
 function TradeCard({ id }: { id: number }) {
   const toast = useToast()
@@ -291,6 +435,10 @@ function TradeCard({ id }: { id: number }) {
   const [mode, setMode] = useState<'order' | 'holding'>('order')
   const [symbol, setSymbol] = useState('')
   const [side, setSide] = useState('BUY')
+  const [orderType, setOrderType] = useState('MARKET')
+  const [timeInForce, setTimeInForce] = useState('DAY')
+  const [limitPrice, setLimitPrice] = useState('')
+  const [stopPrice, setStopPrice] = useState('')
   const [qty, setQty] = useState('')
   const [cost, setCost] = useState('')
   const [openedAt, setOpenedAt] = useState('')
@@ -306,7 +454,15 @@ function TradeCard({ id }: { id: number }) {
       mode === 'order'
         ? api(`/portfolios/${id}/orders`, {
             method: 'POST',
-            body: JSON.stringify({ symbol: symbol.toUpperCase(), side, qty }),
+            body: JSON.stringify({
+              symbol: symbol.toUpperCase(),
+              side,
+              qty,
+              order_type: orderType,
+              time_in_force: timeInForce,
+              limit_price: NEEDS_LIMIT.has(orderType) ? limitPrice : null,
+              stop_price: NEEDS_STOP.has(orderType) ? stopPrice : null,
+            }),
           })
         : api(`/portfolios/${id}/holdings`, {
             method: 'POST',
@@ -317,11 +473,19 @@ function TradeCard({ id }: { id: number }) {
               opened_at: openedAt ? new Date(openedAt).toISOString() : null,
             }),
           }),
-    onSuccess: () => {
+    onSuccess: (result) => {
       setSymbol('')
       setQty('')
       setCost('')
+      setLimitPrice('')
+      setStopPrice('')
       refresh()
+      // A rejected order comes back 201 with its reason, so success is not the same as filled.
+      const order = result as Order | undefined
+      if (mode === 'order' && order?.status === 'REJECTED') {
+        toast(`Order rejected: ${order.reject_reason ?? 'no reason given'}`, 'bad')
+        return
+      }
       toast(mode === 'order' ? 'Order placed.' : 'Holding recorded.', 'ok')
     },
   })
@@ -368,16 +532,42 @@ function TradeCard({ id }: { id: number }) {
           />
         </Field>
         {mode === 'order' && (
-          <Field label="Side">
-            <select
-              className={inputClass}
-              value={side}
-              onChange={(event) => setSide(event.target.value)}
-            >
-              <option value="BUY">BUY</option>
-              <option value="SELL">SELL</option>
-            </select>
-          </Field>
+          <>
+            <Field label="Side">
+              <select
+                className={inputClass}
+                value={side}
+                onChange={(event) => setSide(event.target.value)}
+              >
+                <option value="BUY">BUY</option>
+                <option value="SELL">SELL</option>
+              </select>
+            </Field>
+            <Field label="Type">
+              <select
+                className={inputClass}
+                value={orderType}
+                onChange={(event) => setOrderType(event.target.value)}
+              >
+                {ORDER_TYPES.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Time in force">
+              <select
+                className={inputClass}
+                value={timeInForce}
+                onChange={(event) => setTimeInForce(event.target.value)}
+              >
+                <option value="DAY">Day</option>
+                <option value="GTC">Good till cancelled</option>
+                <option value="IOC">Immediate or cancel</option>
+              </select>
+            </Field>
+          </>
         )}
         <Field label="Quantity">
           <input
@@ -388,6 +578,28 @@ function TradeCard({ id }: { id: number }) {
             required
           />
         </Field>
+        {mode === 'order' && NEEDS_STOP.has(orderType) && (
+          <Field label="Stop price">
+            <input
+              className={inputClass}
+              value={stopPrice}
+              onChange={(event) => setStopPrice(event.target.value)}
+              placeholder="95.00"
+              required
+            />
+          </Field>
+        )}
+        {mode === 'order' && NEEDS_LIMIT.has(orderType) && (
+          <Field label="Limit price">
+            <input
+              className={inputClass}
+              value={limitPrice}
+              onChange={(event) => setLimitPrice(event.target.value)}
+              placeholder="100.00"
+              required
+            />
+          </Field>
+        )}
         {mode === 'holding' && (
           <>
             <Field label="Cost basis per unit">
@@ -416,6 +628,39 @@ function TradeCard({ id }: { id: number }) {
 
       <ErrorNote error={submit.error} className="mt-3" />
     </Card>
+  )
+}
+
+const OPEN_STATUSES = new Set(['ACCEPTED', 'PARTIALLY_FILLED'])
+
+const STATUS_TONES: Record<string, 'ok' | 'bad' | 'warn' | 'muted'> = {
+  FILLED: 'ok',
+  REJECTED: 'bad',
+  ACCEPTED: 'warn',
+  PARTIALLY_FILLED: 'warn',
+}
+
+function CancelOrder({ id, order }: { id: number; order: Order }) {
+  const toast = useToast()
+  const cancel = useCancelOrder(id)
+
+  if (!OPEN_STATUSES.has(order.status)) return null
+
+  return (
+    <Button
+      variant="ghost"
+      disabled={cancel.isPending}
+      onClick={() =>
+        cancel.mutate(order.id, {
+          onSuccess: () => toast(`Cancelled order #${order.id}.`, 'ok'),
+          onError: (error) => toast((error as Error).message, 'bad'),
+        })
+      }
+      title="Cancel this order and release the cash it reserves"
+    >
+      <X className="h-4 w-4" aria-hidden />
+      Cancel
+    </Button>
   )
 }
 
@@ -459,7 +704,9 @@ export function Blotter({ id }: { id: number }) {
         )}
         <ErrorNote error={match.error} className="mb-3" />
         <QueryState query={orders} empty="No orders yet.">
-          <Table head={['#', 'Symbol', 'Name', 'Side', 'Qty', 'Type', 'Status', 'Avg fill', 'Reason']}>
+          <Table
+            head={['#', 'Symbol', 'Name', 'Side', 'Qty', 'Type', 'Status', 'Avg fill', 'Reason', '']}
+          >
             {(orders.data ?? []).map((row) => (
               <Row key={row.id}>
                 <Cell mono>{row.id}</Cell>
@@ -473,11 +720,14 @@ export function Blotter({ id }: { id: number }) {
                 <Cell mono>{qty(row.qty)}</Cell>
                 <Cell>{row.order_type}</Cell>
                 <Cell>
-                  <Badge tone={row.status === 'REJECTED' ? 'bad' : 'muted'}>{row.status}</Badge>
+                  <Badge tone={STATUS_TONES[row.status] ?? 'muted'}>{row.status}</Badge>
                 </Cell>
                 <Cell mono>{money(row.avg_fill_price)}</Cell>
                 <Cell className="text-xs text-[var(--color-ink-muted)]">
                   {row.reject_reason ?? ''}
+                </Cell>
+                <Cell className="text-right">
+                  <CancelOrder id={id} order={row} />
                 </Cell>
               </Row>
             ))}
