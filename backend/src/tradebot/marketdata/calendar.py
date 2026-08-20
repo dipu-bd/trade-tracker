@@ -16,6 +16,30 @@ def _nyse():  # type: ignore[no-untyped-def]
     return exchange_calendars.get_calendar("XNYS")
 
 
+@lru_cache(maxsize=4096)
+def _session_times(day: date) -> tuple[datetime, datetime] | None:
+    """The exchange's own open and close for one day, in UTC.
+
+    Asking the calendar rather than pinning 09:30-16:00 is what makes half-days right. The
+    eight or so early closes a year — the afternoon of Independence Day eve, the day after
+    Thanksgiving, Christmas Eve — end at 13:00 local, and a hardcoded 16:00 had the engine
+    believing it could still trade for three hours after the bell.
+    """
+    calendar_ = _nyse()
+    if not calendar_.is_session(day):
+        return None
+
+    try:
+        open_at = calendar_.session_open(day)
+        close_at = calendar_.session_close(day)
+    except Exception:  # pragma: no cover - a calendar without per-session times
+        return (
+            datetime.combine(day, REGULAR_OPEN, tzinfo=NYSE_TZ).astimezone(UTC),
+            datetime.combine(day, REGULAR_CLOSE, tzinfo=NYSE_TZ).astimezone(UTC),
+        )
+    return open_at.to_pydatetime().astimezone(UTC), close_at.to_pydatetime().astimezone(UTC)
+
+
 def is_24x7(asset_class: AssetClass) -> bool:
     return asset_class not in EQUITY_CLASSES
 
@@ -27,12 +51,11 @@ def is_trading_day(day: date, asset_class: AssetClass = AssetClass.STOCK) -> boo
 
 
 def session_bounds(day: date) -> tuple[datetime, datetime] | None:
-    """Regular-hours open and close in UTC, or None when the exchange is shut."""
-    if not _nyse().is_session(day):
-        return None
-    open_at = datetime.combine(day, REGULAR_OPEN, tzinfo=NYSE_TZ)
-    close_at = datetime.combine(day, REGULAR_CLOSE, tzinfo=NYSE_TZ)
-    return open_at.astimezone(UTC), close_at.astimezone(UTC)
+    """Session open and close in UTC, or None when the exchange is shut.
+
+    Half-days carry their real early close, so this is not always a 6.5-hour window.
+    """
+    return _session_times(day)
 
 
 def is_open(moment: datetime, asset_class: AssetClass = AssetClass.STOCK) -> bool:

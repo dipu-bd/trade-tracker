@@ -52,6 +52,7 @@ class FillResult:
 class MatchReport:
     fills: list[FillResult] = field(default_factory=list)
     expired: list[int] = field(default_factory=list)
+    armed: list[int] = field(default_factory=list)
 
 
 class BrokerService:
@@ -67,7 +68,6 @@ class BrokerService:
         self._ledger = ledger
         self._events = events
         self._clock = clock or LiveClock()
-        self._armed_stops: set[int] = set()
 
     async def create_portfolio(
         self,
@@ -241,10 +241,9 @@ class BrokerService:
             return "market closed"
 
         if order.side == Side.SELL:
-            position = await self._open_position(session, portfolio.id, instrument.id)
-            held = position.qty if position else ZERO
-            if order.qty > held:
-                return f"insufficient position: holding {held}"
+            sellable = await self._sellable_qty(session, portfolio.id, instrument.id, exclude=order)
+            if order.qty > sellable:
+                return f"insufficient position: {sellable} unreserved"
             return None
 
         reference = order.limit_price or reference_price
@@ -257,12 +256,43 @@ class BrokerService:
             return f"insufficient buying power: need {needed}, have {available}"
         return None
 
+    async def _sellable_qty(
+        self,
+        session: AsyncSession,
+        portfolio_id: int,
+        instrument_id: int,
+        *,
+        exclude: Order | None = None,
+    ) -> Decimal:
+        """Open quantity less whatever other resting sells have already claimed.
+
+        A buy reserves cash so two orders cannot spend the same dollar; a sell had no
+        equivalent, so two exit orders for the whole position were both accepted. The second
+        one then reached `_settle_sell` with nothing left to consume and raised straight out of
+        the matching pass, rolling back the first order's perfectly good fill along with it —
+        and it did so again on every pass after that.
+        """
+        position = await self._open_position(session, portfolio_id, instrument_id)
+        if position is None:
+            return ZERO
+
+        stmt = select(func.coalesce(func.sum(Order.qty - Order.filled_qty), 0)).where(
+            Order.portfolio_id == portfolio_id,
+            Order.instrument_id == instrument_id,
+            Order.side == Side.SELL,
+            Order.status.in_(tuple(OrderStatus.OPEN)),
+        )
+        if exclude is not None and exclude.id is not None:
+            stmt = stmt.where(Order.id != exclude.id)
+
+        committed = Decimal(str(await session.scalar(stmt) or 0))
+        return max(ZERO, position.qty - committed)
+
     async def cancel_order(self, session: AsyncSession, order: Order) -> Order:
         if not order.is_open:
             raise ValidationError(f"order {order.id} is already {order.status}")
         order_rules.transition(order, OrderStatus.CANCELED, at=self._clock.now())
         order.reserved_cash = ZERO
-        self._armed_stops.discard(order.id)
         await session.flush()
         return order
 
@@ -305,13 +335,11 @@ class BrokerService:
                 report.expired.append(order.id)
                 continue
 
-            trigger = matching.evaluate(order, quote, stop_armed=order.id in self._armed_stops)
-            if trigger.reference is not None and order.order_type in (
-                OrderType.STOP,
-                OrderType.STOP_LIMIT,
-            ):
-                self._armed_stops.add(order.id)
+            if matching.arms(order, quote):
+                order.stop_armed = True
+                report.armed.append(order.id)
 
+            trigger = matching.evaluate(order, quote)
             if not trigger.fills or trigger.reference is None:
                 if order.time_in_force == TimeInForce.IOC:
                     order_rules.transition(order, OrderStatus.EXPIRED, at=now)
@@ -327,11 +355,15 @@ class BrokerService:
                 qty = await self._affordable_qty(
                     session, portfolio, instrument, qty, trigger.reference
                 )
+            else:
+                # Clamp rather than trust the placement check: a stop exit filled earlier in
+                # this very loop can leave a resting sell with fewer shares than it asked for.
+                position = await self._open_position(session, portfolio.id, instrument.id)
+                qty = min(qty, position.qty if position else ZERO)
             if qty <= ZERO:
-                if order.side == Side.BUY:
-                    order_rules.transition(order, OrderStatus.EXPIRED, at=now)
-                    order.reserved_cash = ZERO
-                    report.expired.append(order.id)
+                order_rules.transition(order, OrderStatus.EXPIRED, at=now)
+                order.reserved_cash = ZERO
+                report.expired.append(order.id)
                 continue
 
             report.fills.append(
@@ -384,8 +416,6 @@ class BrokerService:
         order.reserved_cash = (
             ZERO if not order.is_open else max(ZERO, order.reserved_cash - (notional + fee))
         )
-        if not order.is_open:
-            self._armed_stops.discard(order.id)
         await session.flush()
 
         await self._record(
@@ -687,7 +717,7 @@ class BrokerService:
         snapshot.equity = equity
         snapshot.cash = cash
         snapshot.positions_value = quantize_cash(positions_value)
-        snapshot.realized_pnl = await self._ledger.realized_total(session, portfolio.id)
+        snapshot.realized_pnl = await self._realized_pnl(session, portfolio.id)
         snapshot.unrealized_pnl = quantize_cash(unrealized)
         snapshot.open_positions = len(open_positions)
         snapshot.drawdown_pct = drawdown
@@ -696,6 +726,19 @@ class BrokerService:
             session.add(snapshot)
         await session.flush()
         return snapshot
+
+    async def _realized_pnl(self, session: AsyncSession, portfolio_id: int) -> Decimal:
+        """Profit actually banked, summed over every position the portfolio has ever held.
+
+        Not `Ledger.realized_total`, which is net trading cash flow: a portfolio that has only
+        ever bought reports that as a loss the size of everything it owns.
+        """
+        total = await session.scalar(
+            select(func.coalesce(func.sum(Position.realized_pnl), 0)).where(
+                Position.portfolio_id == portfolio_id
+            )
+        )
+        return quantize_cash(Decimal(str(total or 0)))
 
     async def _record(
         self,

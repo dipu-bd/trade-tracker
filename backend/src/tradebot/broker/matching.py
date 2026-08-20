@@ -32,11 +32,25 @@ def stop_triggered(order: Order, quote: Quote) -> bool:
     return last <= order.stop_price
 
 
-def evaluate(order: Order, quote: Quote, *, stop_armed: bool) -> Trigger:
+def arms(order: Order, quote: Quote) -> bool:
+    """Whether this quote elects a stop order that was not already elected.
+
+    Kept apart from `evaluate` because election and execution are different events: a
+    stop-limit is elected the moment the stop trades through, and only then starts working its
+    limit, possibly for many ticks. Folding the two together is what made the arming flag
+    unreachable — it was only ever set on a tick that also produced a fill price.
+    """
+    if order.order_type not in (OrderType.STOP, OrderType.STOP_LIMIT):
+        return False
+    return not order.stop_armed and stop_triggered(order, quote)
+
+
+def evaluate(order: Order, quote: Quote, *, stop_armed: bool | None = None) -> Trigger:
     """Decide whether this quote fills the order.
 
     `stop_armed` carries whether the stop has already been hit on an earlier tick, so a
-    stop-limit does not need the stop and the limit to be satisfiable on the same tick.
+    stop-limit does not need the stop and the limit to be satisfiable on the same tick. It
+    defaults to the flag stored on the order, which is where that state lives between passes.
     """
     if quote.price <= ZERO:
         return Trigger(False, reason="no price")
@@ -47,6 +61,8 @@ def evaluate(order: Order, quote: Quote, *, stop_armed: bool) -> Trigger:
     if order.order_type == OrderType.LIMIT:
         return _limit_trigger(order, quote)
 
+    if stop_armed is None:
+        stop_armed = bool(order.stop_armed)
     armed = stop_armed or stop_triggered(order, quote)
     if not armed:
         return Trigger(False, reason="stop not reached")
