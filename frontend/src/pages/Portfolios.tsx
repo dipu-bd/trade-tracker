@@ -20,6 +20,7 @@ import {
   useDeletePortfolio,
   useFills,
   useLedger,
+  useMatchOrders,
   useOrders,
   usePortfolio,
   usePortfolios,
@@ -422,12 +423,41 @@ export function Blotter({ id }: { id: number }) {
   const orders = useOrders(id)
   const fills = useFills(id)
   const ledger = useLedger(id)
+  const match = useMatchOrders(id)
+  const waiting = Object.entries(match.data?.waiting ?? {})
 
   return (
     <div className="grid gap-4">
       <TradeCard id={id} />
 
-      <Card title="Orders">
+      <Card
+        title="Orders"
+        action={
+          <Button onClick={() => match.mutate()} disabled={match.isPending}>
+            {match.isPending ? 'Matching…' : 'Match now'}
+          </Button>
+        }
+      >
+        {match.data && (
+          <p className="mb-3 text-sm text-[var(--color-ink-muted)]">
+            {match.data.filled} filled, {match.data.expired} expired, {match.data.stops} stopped
+            out.
+            {waiting.length > 0 && (
+              <>
+                {' '}
+                Still resting:{' '}
+                {waiting.map(([symbol, reason], index) => (
+                  <span key={symbol}>
+                    {index > 0 && ', '}
+                    <span className="font-mono text-xs">{symbol}</span> ({reason})
+                  </span>
+                ))}
+                .
+              </>
+            )}
+          </p>
+        )}
+        <ErrorNote error={match.error} className="mb-3" />
         <QueryState query={orders} empty="No orders yet.">
           <Table head={['#', 'Symbol', 'Name', 'Side', 'Qty', 'Type', 'Status', 'Avg fill', 'Reason']}>
             {(orders.data ?? []).map((row) => (

@@ -567,6 +567,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/portfolios/{portfolio_id}/match": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Match
+         * @description Work this portfolio's resting orders against the latest quotes now.
+         *
+         *     The scheduler does this on its own interval; exposed because "why is my order still
+         *     ACCEPTED?" deserves an answer on demand, and `waiting` carries the reason per symbol.
+         */
+        post: operations["run_match_api_portfolios__portfolio_id__match_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/portfolios/{portfolio_id}/cycles/{run_id}": {
         parameters: {
             query?: never;
@@ -1637,6 +1660,22 @@ export interface components {
             email: string;
             /** Password */
             password: string;
+        };
+        /**
+         * MatchRun
+         * @description The outcome of one matching pass, including why anything is still resting.
+         */
+        MatchRun: {
+            /** Filled */
+            filled: number;
+            /** Expired */
+            expired: number;
+            /** Stops */
+            stops: number;
+            /** Waiting */
+            waiting: {
+                [key: string]: string;
+            };
         };
         /**
          * ModelProfileIn
@@ -3233,6 +3272,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CycleTriggered"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_match_api_portfolios__portfolio_id__match_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MatchRun"];
                 };
             };
             /** @description Validation Error */

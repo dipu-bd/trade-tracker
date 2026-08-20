@@ -62,6 +62,15 @@ class CycleTriggered(BaseModel):
     error: str | None = None
 
 
+class MatchRun(BaseModel):
+    """The outcome of one matching pass, including why anything is still resting."""
+
+    filled: int
+    expired: int
+    stops: int
+    waiting: dict[str, str]
+
+
 class ScheduledJob(BaseModel):
     id: str
     cron: str

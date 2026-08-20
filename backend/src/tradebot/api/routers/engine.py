@@ -15,10 +15,12 @@ from tradebot.schemas.engine import (
     CycleTriggered,
     DecisionRunDetail,
     DecisionRunOut,
+    MatchRun,
     ScheduledJob,
     StrategySettings,
     StrategySummary,
 )
+from tradebot.workers.matching import MatchingPass
 from tradebot.workers.scheduler import CADENCES, EngineScheduler
 
 router = APIRouter(prefix="/portfolios", tags=["engine"])
@@ -97,6 +99,27 @@ async def run_cycle(
         exits=len(decision.exits) if decision else 0,
         regime=decision.regime.state.value if decision else "",
         error=report.error,
+    )
+
+
+@router.post("/{portfolio_id}/match", response_model=MatchRun)
+async def run_match(
+    portfolio_id: int, user: CurrentUser, context: Context, session: DbSession
+) -> MatchRun:
+    """Work this portfolio's resting orders against the latest quotes now.
+
+    The scheduler does this on its own interval; exposed because "why is my order still
+    ACCEPTED?" deserves an answer on demand, and `waiting` carries the reason per symbol.
+    """
+    await load_portfolio(session, portfolio_id, user.id)
+    await session.commit()
+
+    report = await MatchingPass(context).run(portfolio_id)
+    return MatchRun(
+        filled=report.filled,
+        expired=report.expired,
+        stops=report.stops,
+        waiting=report.waiting,
     )
 
 
