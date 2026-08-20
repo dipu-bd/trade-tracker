@@ -9,9 +9,14 @@ Design and rationale live in the plan; this file covers running it.
 
 ## Status
 
-**M1 — foundation.** Auth, encrypted credential vault, event recording with a live stream,
-migrations, Docker, CI. The trading engine, market data, broker, and dashboard land in later
-milestones.
+Everything is in: auth and an encrypted credential vault, capability-routed market data, the
+rules engine and its decision cycle, the AI meta-labeller with guardrails, a paper broker over
+an append-only cash ledger, the replay backtester, and the dashboard, with event recording and
+a live stream underneath all of it.
+
+Portfolios can be paused. A paused portfolio is skipped by the scheduled cycles and by order
+matching, and refuses new orders; resting orders are left alone and start working again on
+resume.
 
 ## Quick start
 

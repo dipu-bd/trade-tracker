@@ -88,18 +88,21 @@ export function Button({
   variant = 'default',
   disabled,
   type = 'button',
+  title,
 }: {
   children: ReactNode
   onClick?: () => void
   variant?: 'default' | 'primary' | 'ghost' | 'danger'
   disabled?: boolean
   type?: 'button' | 'submit'
+  title?: string
 }) {
   return (
     <button
       type={type}
       onClick={onClick}
       disabled={disabled}
+      title={title}
       className={clsx(
         'inline-flex min-h-9 items-center justify-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40',
         variant === 'primary' &&

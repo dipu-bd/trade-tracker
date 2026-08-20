@@ -4,6 +4,7 @@ type S = components['schemas']
 
 export type Portfolio = S['PortfolioOut']
 export type PortfolioDetail = S['PortfolioDetail']
+export type PortfolioUpdate = S['PortfolioUpdate']
 export type Position = S['PositionOut']
 export type Order = S['OrderOut']
 export type Fill = S['FillOut']

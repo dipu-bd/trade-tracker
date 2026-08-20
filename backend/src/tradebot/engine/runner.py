@@ -58,6 +58,10 @@ class EngineRunner:
             portfolio = await session.get(Portfolio, portfolio_id)
             if portfolio is None:
                 raise RuntimeError(f"portfolio {portfolio_id} not found")
+            if not portfolio.is_active:
+                # The cron already filters on this; a manual run has to as well, or a paused
+                # portfolio still places orders that nothing will ever match.
+                raise RuntimeError(f"portfolio {portfolio_id} is paused")
 
             keys = await self._context.providers.llm_keys(session, portfolio.user_id)
             report = await self._cycle(keys).run(session, portfolio, trigger=trigger)
