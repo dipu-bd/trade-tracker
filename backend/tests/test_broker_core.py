@@ -66,6 +66,40 @@ def test_a_reservation_covers_the_worst_plausible_fill() -> None:
 
 
 @pytest.mark.parametrize(
+    "budget",
+    [Decimal("1312.0504041790"), Decimal(1000), Decimal("250.75"), Decimal("11")],
+)
+def test_the_affordable_size_leaves_room_for_the_commission(budget: Decimal) -> None:
+    """Sizing that spends the whole balance is short by exactly the charge on top of it."""
+    reference = Decimal("37.42")
+    qty = COSTS.affordable_qty(budget, reference, whole_units=False)
+
+    assert qty > 0
+    assert COSTS.reservation(qty, reference) <= budget
+    # And it is the *largest* such size: one more unit no longer fits.
+    assert COSTS.reservation(qty + Decimal("0.0000000001"), reference) > budget
+
+
+def test_the_affordable_size_is_bounded_by_the_minimum_commission() -> None:
+    """A floor larger than the budget leaves nothing to buy with, rather than a rejected order."""
+    costly = CostModel(
+        slippage_bps=Decimal(10), commission_bps=Decimal(0), min_commission=Decimal(10)
+    )
+
+    assert costly.affordable_qty(Decimal(9), Decimal(100)) == Decimal(0)
+    assert costly.affordable_qty(Decimal(0), Decimal(100)) == Decimal(0)
+    assert costly.affordable_qty(Decimal(1000), Decimal(0)) == Decimal(0)
+
+
+def test_the_affordable_size_respects_whole_units() -> None:
+    qty = COSTS.affordable_qty(Decimal(1000), Decimal("37.42"), whole_units=True)
+
+    assert qty == qty.to_integral_value()
+    assert COSTS.reservation(qty, Decimal("37.42")) <= Decimal(1000)
+    assert COSTS.reservation(qty + 1, Decimal("37.42")) > Decimal(1000)
+
+
+@pytest.mark.parametrize(
     ("order_type", "limit", "stop", "ok"),
     [
         (OrderType.MARKET, None, None, True),

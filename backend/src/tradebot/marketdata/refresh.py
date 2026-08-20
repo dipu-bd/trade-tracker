@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tradebot.context import AppContext
@@ -74,22 +74,23 @@ class MarketSync:
         total = IngestReport()
 
         async with self._context.db.session() as session:
-            instruments = list(
-                await session.scalars(
-                    # Deliberately not filtered on first_bar_date: an instrument with no bars
-                    # is the one that most needs a fetch, and excluding it meant a name whose
-                    # first bar fetch failed could never recover.
-                    select(Instrument).where(Instrument.is_active.is_(True))
-                )
+            tracked = await session.scalar(
+                select(func.count(Instrument.id)).where(Instrument.is_active.is_(True))
             )
             owners = await self._owners(session)
 
-        if not instruments or not owners:
-            _log.info("market_refresh_skipped", instruments=len(instruments), owners=len(owners))
+        if not tracked or not owners:
+            _log.info("market_refresh_skipped", instruments=tracked or 0, owners=len(owners))
             return total
 
         for user_id in owners:
             async with self._context.db.session() as session:
+                # Re-read inside the session that will commit. The refresh stamps the last
+                # quote and bar dates onto the instrument row, and a row loaded by a session
+                # that has since closed is detached — those writes went nowhere, so every
+                # `last_quote_price` stayed blank and the matching pass had no price to fill
+                # a resting order against.
+                instruments = await self._tracked(session)
                 service = await self._service(session, user_id)
                 # force=False, so a second owner's pass skips everything the first already made
                 # fresh rather than spending another provider call on it.
@@ -129,6 +130,15 @@ class MarketSync:
 
     async def _owners(self, session: AsyncSession) -> list[int]:
         return list(await session.scalars(select(Portfolio.user_id).distinct()))
+
+    async def _tracked(self, session: AsyncSession) -> list[Instrument]:
+        rows = await session.scalars(
+            # Deliberately not filtered on first_bar_date: an instrument with no bars is the
+            # one that most needs a fetch, and excluding it meant a name whose first bar fetch
+            # failed could never recover.
+            select(Instrument).where(Instrument.is_active.is_(True))
+        )
+        return list(rows)
 
     async def _service(self, session: AsyncSession, user_id: int) -> MarketDataService:
         router = await self._context.providers.build_router(session, user_id)

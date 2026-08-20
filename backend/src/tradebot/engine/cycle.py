@@ -454,6 +454,16 @@ class DecisionCycle:
         if qty <= 0:
             return "sized below one unit"
 
+        # Target weights are a fraction of *equity*, which includes what is already invested,
+        # and they say nothing about commission or slippage. Cash is what actually pays, so cap
+        # the bet at what buying power carries: without this a fully invested cycle proposed a
+        # notional a few dollars past its own balance and the broker rejected the whole order
+        # rather than trimming it, on every pass, forever.
+        affordable = await self._broker.affordable_qty(session, portfolio, mark)
+        if affordable <= 0:
+            return "insufficient buying power"
+        qty = min(qty, affordable)
+
         order = await self._broker.place_order(
             session,
             portfolio=portfolio,

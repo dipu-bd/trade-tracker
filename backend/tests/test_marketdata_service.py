@@ -330,3 +330,47 @@ def test_a_closed_market_is_quoted_once_then_left_alone(
     instrument = Instrument(symbol="AAA", asset_class="stock", last_quote_at=last_quote_at)
 
     assert sync._quotable(instrument) is quotable
+
+
+async def test_the_scheduled_refresh_actually_writes_the_quote_it_fetched(
+    context: AppContext,
+) -> None:
+    """The bug that left every resting order unfilled.
+
+    `refresh_all` loaded its instruments in one session and stamped the fetched quote onto them
+    in another. A row loaded by a session that has since closed is detached, so the assignment
+    landed on a Python object and nothing else — the pass reported a quote updated, the column
+    stayed null, and the matching pass had no price to work an order against, forever.
+    """
+    from tradebot.marketdata.refresh import MarketSync
+
+    async with context.db.session() as session:
+        user = User(email="owner@example.com", password_hash="x", display_name="Owner")
+        session.add(user)
+        await session.flush()
+        session.add(Instrument(symbol="AAA", asset_class="stock", is_active=True))
+        session.add(
+            Portfolio(user_id=user.id, name="p", initial_capital=Decimal(1000), base_currency="USD")
+        )
+        await session.flush()
+
+    provider = FakeProvider()
+    provider.prices["AAA"] = Decimal("42.5")
+    sync = MarketSync(context)
+
+    async def service(_session: object, _user_id: int) -> MarketDataService:
+        return make_service(context, [provider])
+
+    sync._service = service  # type: ignore[method-assign]
+    report = await sync.refresh_all()
+
+    assert report.quotes_updated == 1
+
+    async with context.db.session() as session:
+        stored = await session.scalar(select(Instrument).where(Instrument.symbol == "AAA"))
+
+    assert stored is not None
+    assert stored.last_quote_price == Decimal("42.5")
+    assert stored.last_quote_at is not None
+    # Written in the same pass and by the same detached rows, so it went missing alongside it.
+    assert stored.last_bar_date is not None

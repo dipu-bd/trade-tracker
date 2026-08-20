@@ -387,3 +387,98 @@ async def test_features_from_stored_bars_match_the_pure_extractor(
         from_view = await view.features("AAA")
 
     assert from_view == extract(series)
+
+
+async def test_an_entry_is_trimmed_to_buying_power_rather_than_rejected(
+    context: AppContext, clock: FrozenClock, portfolio_row: int
+) -> None:
+    """A target weight is a share of equity and knows nothing about the commission.
+
+    With a minimum commission in force, a cycle sizing a bet at its whole balance asked for
+    exactly one commission more than it had, and the broker rejected the order instead of
+    trimming it — the same rejection on every pass, forever. The order is now placed for what
+    buying power actually carries.
+    """
+    from tradebot.broker.ledger import Ledger
+    from tradebot.db.models import OrderStatus, Portfolio
+
+    await seed(context, "SPY", daily=0.0008, count=700, asset_class="index")
+    await seed(context, "AAA", daily=0.002)
+
+    async with context.db.session() as session:
+        portfolio = await session.get(Portfolio, portfolio_row)
+        portfolio.min_commission = Decimal(10)
+        portfolio.commission_bps = Decimal(0)
+        portfolio.slippage_bps = Decimal(0)
+        # One name at the full balance, which is what makes the commission the whole difference
+        # between the size asked for and the size affordable.
+        portfolio.strategy = {
+            "sizing": {
+                "max_position_weight": 1.0,
+                "max_positions": 1,
+                "risk_per_trade": 1.0,
+                "kelly_fraction": 1.0,
+                "vol_scaling": False,
+                "unscaled_weight": 1.0,
+            }
+        }
+
+    async with context.db.session() as session:
+        portfolio = await session.get(Portfolio, portfolio_row)
+        report = await cycle(context, clock).run(session, portfolio, trigger="manual")
+
+    assert report.ok, report.error
+    assert report.orders
+
+    broker = BrokerService(Ledger(clock=clock), context.events, clock=clock)
+    async with context.db.session() as session:
+        orders = list(await session.scalars(select(Order)))
+        cash = await broker.cash(session, portfolio_row)
+        remaining = await broker.buying_power(session, portfolio_row)
+
+    assert orders
+    assert all(order.status == OrderStatus.ACCEPTED for order in orders)
+    assert all(order.reject_reason is None for order in orders)
+    assert all(order.qty > 0 for order in orders)
+    # Reserved to the hilt but never past it: the commission is inside the balance, not on top.
+    assert remaining >= 0
+    assert cash - remaining > cash * Decimal("0.9")
+
+
+async def test_a_cycle_with_no_spendable_cash_says_so_instead_of_rejecting(
+    context: AppContext, clock: FrozenClock, portfolio_row: int
+) -> None:
+    """Cash below the minimum commission buys nothing, and the cycle says which it was."""
+    from tradebot.broker.ledger import Ledger
+    from tradebot.db.models import EntryType, Portfolio
+
+    await seed(context, "SPY", daily=0.0008, count=700, asset_class="index")
+    await seed(context, "AAA", daily=0.002)
+
+    async with context.db.session() as session:
+        portfolio = await session.get(Portfolio, portfolio_row)
+        portfolio.min_commission = Decimal(10)
+
+    ledger = Ledger(clock=clock)
+    async with context.db.session() as session:
+        # Down to less than one commission: the weights still want the name, and the balance
+        # cannot carry even the charge on the smallest possible bet.
+        balance = await ledger.balance(session, portfolio_row)
+        await ledger.post(
+            session,
+            portfolio_id=portfolio_row,
+            entry_type=EntryType.ADJUSTMENT,
+            amount=-(balance - Decimal(5)),
+            memo="drained",
+        )
+
+    async with context.db.session() as session:
+        portfolio = await session.get(Portfolio, portfolio_row)
+        report = await cycle(context, clock).run(session, portfolio, trigger="manual")
+
+    assert report.ok, report.error
+    assert report.orders == []
+    assert report.skipped_orders.get("AAA") == "insufficient buying power"
+
+    async with context.db.session() as session:
+        assert list(await session.scalars(select(Order))) == []

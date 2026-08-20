@@ -185,6 +185,20 @@ class BrokerService:
             await self.cash(session, portfolio_id) - await self.reserved(session, portfolio_id)
         )
 
+    async def affordable_qty(
+        self, session: AsyncSession, portfolio: Portfolio, reference: Decimal
+    ) -> Decimal:
+        """The largest BUY of this instrument that current buying power can carry.
+
+        Offered so a caller can size a bet against what the account can actually pay, including
+        the commission and the slippage the reservation is taken at, instead of proposing a
+        notional and finding out from a rejection.
+        """
+        budget = await self.buying_power(session, portfolio.id)
+        return CostModel.of(portfolio).affordable_qty(
+            budget, reference, whole_units=not portfolio.allow_fractional
+        )
+
     async def place_order(
         self,
         session: AsyncSession,
@@ -564,11 +578,12 @@ class BrokerService:
         if price <= ZERO or costs.buy_cost(qty, price) <= cash:
             return qty
 
-        whole = not portfolio.allow_fractional
-        affordable = quantize_qty(cash / price, whole_units=whole)
-        while affordable > ZERO and costs.buy_cost(affordable, price) > cash:
-            affordable = quantize_qty(affordable * Decimal("0.999"), whole_units=whole)
-        return max(ZERO, affordable)
+        # Cash rather than buying power: this order's own reservation is part of the balance it
+        # is about to spend, so netting it off again would shrink the fill twice.
+        return min(
+            qty,
+            costs.affordable_qty(cash, reference, whole_units=not portfolio.allow_fractional),
+        )
 
     async def _participation(
         self, session: AsyncSession, instrument: Instrument, qty: Decimal, reference: Decimal

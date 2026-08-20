@@ -1,7 +1,7 @@
 from dataclasses import dataclass, replace
 from decimal import Decimal
 
-from tradebot.core.money import bps, quantize_cash, quantize_price
+from tradebot.core.money import QTY, bps, quantize_cash, quantize_price, quantize_qty
 from tradebot.db.models import Portfolio, Side
 
 ZERO = Decimal(0)
@@ -68,3 +68,33 @@ class CostModel:
         """
         worst = self.fill_price(reference, Side.BUY)
         return self.buy_cost(qty, worst)
+
+    def affordable_qty(
+        self, budget: Decimal, reference: Decimal, *, whole_units: bool = False
+    ) -> Decimal:
+        """The largest quantity whose `reservation` still fits inside `budget`.
+
+        Solved rather than searched. The commission is `max(notional * rate, minimum)`, so a
+        notional only clears the budget when it leaves room for *both* terms; the binding one
+        is whichever leaves less. Sizing that ignores the charge entirely is what had a cycle
+        ask for its whole cash balance and then get rejected for the commission on top of it,
+        by exactly one minimum commission, on every pass.
+        """
+        # `fill_price` floors at one price tick, so a missing or zero reference would otherwise
+        # come back as a position of billions rather than as nothing to size.
+        if reference <= ZERO or budget <= ZERO:
+            return ZERO
+
+        worst = self.fill_price(reference, Side.BUY)
+        rate = self.commission_bps / Decimal(10_000)
+        notional = min(budget / (Decimal(1) + rate), budget - self.min_commission)
+        if notional <= ZERO:
+            return ZERO
+
+        step = Decimal(1) if whole_units else QTY
+        qty = quantize_qty(notional / worst, whole_units=whole_units)
+        # Quantization already rounds down, so this corrects for the half-up rounding inside
+        # `buy_cost` rather than searching: it is a guard, not the algorithm.
+        while qty > ZERO and self.buy_cost(qty, worst) > budget:
+            qty = quantize_qty(qty - step, whole_units=whole_units)
+        return max(qty, ZERO)
