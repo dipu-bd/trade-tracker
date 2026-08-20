@@ -779,8 +779,9 @@ class BrokerService:
     async def _realized_pnl(self, session: AsyncSession, portfolio_id: int) -> Decimal:
         """Profit actually banked, summed over every position the portfolio has ever held.
 
-        Not `Ledger.realized_total`, which is net trading cash flow: a portfolio that has only
-        ever bought reports that as a loss the size of everything it owns.
+        Not the ledger's net trading cash flow, which this used to be: sales less purchases
+        less fees reports a portfolio that has only ever bought as a loss the size of
+        everything it owns.
         """
         total = await session.scalar(
             select(func.coalesce(func.sum(Position.realized_pnl), 0)).where(
